@@ -1,0 +1,95 @@
+🎨 BUG FIX REQUEST
+Music & Movement – Scroll Container Cropped (Top & Left)
+
+Module: Circle Time → Music & Movement
+
+🚨 ISSUE
+
+The movement selection container is:
+
+Cropped from the top
+
+Cropped from the left
+
+Content appears shifted or partially hidden
+
+Scroll area looks misaligned inside its parent frame
+
+This is not a bottom overflow issue — it is a positioning and padding problem.
+
+✅ REQUIRED FIX
+1️⃣ Reset Positioning
+
+Remove any negative margins
+
+Remove manual X/Y positioning
+
+Ensure container uses proper Auto Layout (no absolute positioning unless required)
+
+Set alignment to Top Left (0,0 inside parent)
+
+2️⃣ Fix Parent Padding
+
+Check the parent container:
+
+Add 16–20px padding on all sides
+
+Ensure no clipping mask is cutting off the top or left
+
+Remove unnecessary overflow: hidden on parent wrapper
+
+3️⃣ Fix Auto Layout Settings
+
+If using Auto Layout:
+
+Parent:
+
+Direction: Vertical
+
+Align: Top / Left
+
+Padding: 16–20px
+
+Child (scroll container):
+
+Width: Fill container
+
+Height: Fixed max height with vertical scroll
+
+No negative offsets
+
+4️⃣ Check Scroll Container Alignment
+
+Scroll container should:
+
+Start at X = 0 relative to padded parent
+
+Start at Y = 0 relative to padded parent
+
+Not exceed parent width
+
+Not be scaled or transformed
+
+5️⃣ Remove Clipping Mask (If Applied)
+
+If a mask is being used:
+
+Ensure mask frame matches container bounds
+
+Or remove mask entirely
+
+Do NOT use masking as a layout fix
+
+🎯 EXPECTED RESULT
+
+Movement selection should:
+
+✔ Be fully visible from top
+✔ Be fully visible from left
+✔ Have proper internal padding
+✔ Align cleanly inside the card
+✔ Scroll without visual cropping
+
+No hidden edges.
+No shifted content.
+No cut corners.
