@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+backend/venv/
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# GCP Service Account Keys — NEVER commit these
+*-sa-key.json
+*-service-account-key.json
+nurture-backend-sa-key.json
+
+# Logs
+*.log
+npm-debug.log*
