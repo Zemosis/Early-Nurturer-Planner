@@ -27,6 +27,7 @@ Thumbs.db
 *-sa-key.json
 *-service-account-key.json
 nurture-backend-sa-key.json
+nurture-backend-sa-key-v2.json
 
 # Logs
 *.log
