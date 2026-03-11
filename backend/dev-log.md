@@ -104,3 +104,98 @@
 
 ### Next Steps
 * Phase 4: Ingest pedagogy PDFs into `vector_store_curriculum`, implement real embedding + pgvector cosine search in `query_pedagogy()`, and build the LangGraph agent graph with Architect ↔ Auditor critique loop.
+
+---
+
+## Phase 4: LangGraph Multi-Agent Brain
+**Status:** Complete
+**Date:** March 11, 2026
+
+### Key Accomplishments
+
+* **Auditor & Curriculum Schemas (`backend/app/agents/schemas.py`):**
+    * `AuditScores` — Nested rubric model with `safety`, `developmental_fit`, and `creativity` scores (1–10, enforced with `ge`/`le` constraints).
+    * `AuditResultSchema` — Structured Auditor output: `accepted` (bool), `critique` (str), `safety_concerns` (list[str]), `scores` (AuditScores). Maps directly to the `critique_history` DB table.
+    * `ObjectiveSchema` — Domain + goal pair for weekly objectives.
+    * `AgeAdaptationSchema` — Per-activity age adaptation with `Literal["0-12m", "12-24m", "24-36m"]` enum, description, and modifications list. Mirrors frontend `AgeAdaptation` interface.
+    * `ActivitySchema` — Full activity model merging `WeekPlan.activities` (simple) with `DetailedActivity` (rich). Includes `id`, `day`, `title`, `domain`, `duration`, `description`, `theme_connection`, `materials`, `safety_notes`, `adaptations`, and `reflection_prompts`.
+    * `SongSchema` — Circle time song with title, script (lyrics), and duration.
+    * `YogaPoseSchema` — Toddler yoga pose with name, benefits, and hold duration.
+    * `CircleTimeSchema` — Full circle-time plan: letter, color, shape, counting_to, greeting/goodbye songs, yoga poses, read-aloud recommendation, and discussion prompt. Media URLs excluded from AI generation (curated separately).
+    * `DailyPlanSchema` — Single day's schedule with `day`, `focus_domain`, and 1–4 activities.
+    * `NewsletterSchema` — Parent newsletter with `welcome_message`, `learning_goals`, `home_connection`, plus `professional_version` and `warm_version` text.
+    * `WeekPlanSchema` — Master curriculum model: `id`, `week_number`, `week_range`, `theme`, `theme_emoji`, `palette`, `domains`, `objectives`, `circle_time`, exactly 5 `daily_plans`, and `newsletter`.
+
+* **Graph State (`backend/app/agents/state.py`):**
+    * `PlannerState` TypedDict with `total=False` — each node returns only the keys it modifies.
+    * Inputs: `user_id`, `thread_id`, `selected_theme`, `week_number`, `week_range`.
+    * Context: `student_context`, `pedagogy_context` (populated by fetch_context node).
+    * Agent outputs: `draft_plan`, `audit_result`, `personalized_plan`.
+    * Control: `iteration_count` (max 3), `error`.
+
+* **Curriculum Architect (`backend/app/agents/architect.py`):**
+    * Async `curriculum_architect(state) -> dict` LangGraph node.
+    * System prompt: senior Montessori curriculum designer persona with structural rules (5 days, adaptations, safety_notes, circle time, newsletter).
+    * User prompt includes theme JSON, week details, student roster, and pedagogy context.
+    * Critique loop: if `iteration_count > 0` and `audit_result` exists, appends `⚠️ REVISION REQUIRED` section with auditor's critique and specific safety concerns.
+    * Gemini config: `response_schema=WeekPlanSchema`, `temperature=0.9`.
+    * Returns `{"draft_plan": ..., "iteration_count": n+1, "error": None}`.
+
+* **Safety Auditor (`backend/app/agents/auditor.py`):**
+    * Async `safety_auditor(state) -> dict` LangGraph node.
+    * System prompt: rigorous safety compliance officer persona evaluating 3 criteria — physical safety (choking hazards, toxic materials), developmental appropriateness (age fit, duration), thematic coherence.
+    * Decision rules: `safety < 7` → must reject, `developmental_fit < 6` → must reject.
+    * Includes `draft_plan` (serialised JSON), `student_context`, and `selected_theme` in prompt.
+    * Gemini config: `response_schema=AuditResultSchema`, `temperature=0.3` (deterministic judgment).
+    * Does NOT mutate `iteration_count`.
+    * Guard: returns pre-built rejection if `draft_plan` is None.
+
+* **Personalizer (`backend/app/agents/personalizer.py`):**
+    * Async `personalize_plan(state) -> dict` LangGraph node.
+    * System prompt: master Montessori guide with strict constraints — MUST NOT change core activities, materials, or safety_notes. MAY ONLY enrich `adaptations`, `description`, `reflection_prompts`, and `theme_connection` with child-specific references.
+    * Includes auditor praise in prompt to reinforce what NOT to touch.
+    * Gemini config: `response_schema=WeekPlanSchema`, `temperature=0.5`.
+    * Guards: rejects if `draft_plan` is None or `audit_result.accepted` is False.
+
+* **Graph Wiring (`backend/app/agents/graph.py`):**
+    * `fetch_context_node(state)` — Calls `fetch_student_context()` and `query_pedagogy()` to populate state before the Architect runs.
+    * `save_plan_node(state)` — Persists to Postgres:
+        * `personalized_plan` → `weekly_plans` table (flattens `daily_plans` → `activities` column, converts `user_id` str → UUID).
+        * `audit_result` → `critique_history` table (`iteration_count` → `round_number`, draft JSON → `architect_proposal`).
+        * Pipeline summary → `agent_reasoning_logs` table.
+    * `route_auditor(state) -> str` — Conditional edge: `"personalize"` if accepted / iteration cap reached / error present; `"revise"` otherwise.
+    * `build_planner_graph()` — Compiles the full `StateGraph`:
+        ```
+        START → fetch_context → architect → auditor
+                       ↑                       ↓
+                       └──── (revise) ←── route_auditor
+                                              ↓
+                                        (personalize)
+                                              ↓
+                                         personalizer → save → END
+        ```
+
+### Architecture Notes
+
+* **Temperature Strategy:** Architect (0.9, creative) → Auditor (0.3, strict) → Personalizer (0.5, balanced). Each temperature matches the agent's role.
+* **Structured Output Everywhere:** All three agents use `response_schema` with Pydantic models — zero free-text parsing, guaranteed JSON conformance.
+* **Iteration Cap:** Maximum 3 Architect passes before force-accepting. Prevents infinite critique loops while allowing meaningful revision.
+* **Error Resilience:** `route_auditor` checks for errors and routes forward to avoid infinite error loops. Save node falls back to `draft_plan` if personalization failed.
+* **DB Mapping:** `WeekPlanSchema.daily_plans` (5 DailyPlanSchema objects) is flattened to a single activities list for the `weekly_plans.activities` JSONB column.
+
+### Files Created / Modified
+
+| File | Action |
+|---|---|
+| `backend/app/agents/schemas.py` | Extended with 12 new Pydantic models |
+| `backend/app/agents/state.py` | Created — `PlannerState` TypedDict |
+| `backend/app/agents/architect.py` | Created — Curriculum Architect node |
+| `backend/app/agents/auditor.py` | Created — Safety Auditor node |
+| `backend/app/agents/personalizer.py` | Created — Personalizer node |
+| `backend/app/agents/graph.py` | Created — Graph wiring, save node, routing |
+
+### Next Steps
+* Phase 5: Create FastAPI endpoints to invoke `build_planner_graph()`, expose theme selection and plan generation to the frontend.
+* Implement real embedding + pgvector cosine search in `query_pedagogy()` (replace mock data).
+* Ingest pedagogy PDFs into `vector_store_curriculum`.
+* Add LangGraph checkpoint persistence using `agent_checkpoints` table for resume-on-failure.
