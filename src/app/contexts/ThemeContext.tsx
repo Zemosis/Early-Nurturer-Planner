@@ -4,7 +4,9 @@ import { themeLibrary, ThemeDetail } from '../utils/themeData';
 interface ThemeContextType {
   currentTheme: ThemeDetail;
   setTheme: (themeId: string) => void;
+  setThemeFromDetail: (detail: ThemeDetail) => void;
   previewTheme: (themeId: string | null) => void;
+  registerDynamicThemes: (themes: ThemeDetail[]) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -12,9 +14,13 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [currentTheme, setCurrentTheme] = useState<ThemeDetail>(themeLibrary[0]);
   const [originalTheme, setOriginalTheme] = useState<ThemeDetail>(themeLibrary[0]);
+  const [dynamicThemes, setDynamicThemes] = useState<ThemeDetail[]>([]);
+
+  const findTheme = (themeId: string): ThemeDetail | undefined =>
+    themeLibrary.find(t => t.id === themeId) ?? dynamicThemes.find(t => t.id === themeId);
 
   const setTheme = (themeId: string) => {
-    const theme = themeLibrary.find(t => t.id === themeId);
+    const theme = findTheme(themeId);
     if (theme) {
       setCurrentTheme(theme);
       setOriginalTheme(theme);
@@ -22,12 +28,22 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const setThemeFromDetail = (detail: ThemeDetail) => {
+    setCurrentTheme(detail);
+    setOriginalTheme(detail);
+    applyThemeColors(detail);
+  };
+
+  const registerDynamicThemes = (themes: ThemeDetail[]) => {
+    setDynamicThemes(themes);
+  };
+
   const previewTheme = (themeId: string | null) => {
     if (themeId === null) {
       // Restore original theme
       applyThemeColors(originalTheme);
     } else {
-      const theme = themeLibrary.find(t => t.id === themeId);
+      const theme = findTheme(themeId);
       if (theme) {
         applyThemeColors(theme, true); // Preview mode
       }
@@ -73,7 +89,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <ThemeContext.Provider value={{ currentTheme, setTheme, previewTheme }}>
+    <ThemeContext.Provider value={{ currentTheme, setTheme, setThemeFromDetail, previewTheme, registerDynamicThemes }}>
       {children}
     </ThemeContext.Provider>
   );

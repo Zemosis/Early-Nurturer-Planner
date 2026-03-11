@@ -10,6 +10,7 @@ injected into the prompt so the Architect can fix rejected issues.
 """
 
 import json
+import logging
 
 from google import genai
 from google.genai import types
@@ -18,6 +19,8 @@ from pydantic import TypeAdapter
 from app.agents.schemas import WeekPlanSchema
 from app.agents.state import PlannerState
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 # ── Gemini async client (Vertex AI mode) ──────────────────────
 gemini_client = genai.Client(
@@ -125,6 +128,7 @@ async def curriculum_architect(state: PlannerState) -> dict:
         )
 
     # ── Call Gemini with structured output ─────────────────────
+    logger.info("Architect: calling Gemini (iteration %d)", iteration_count)
     try:
         response = await gemini_client.aio.models.generate_content(
             model=GEMINI_MODEL,
@@ -139,16 +143,20 @@ async def curriculum_architect(state: PlannerState) -> dict:
 
         raw_text = response.text
         if not raw_text:
+            logger.warning("Architect: Gemini returned empty response")
             return {
                 "draft_plan": None,
                 "iteration_count": iteration_count + 1,
                 "error": "Gemini returned an empty response.",
             }
 
+        logger.info("Architect: received %d chars, validating schema", len(raw_text))
+
         # Validate through Pydantic
         adapter = TypeAdapter(WeekPlanSchema)
         plan = adapter.validate_json(raw_text)
 
+        logger.info("Architect: plan validated successfully")
         return {
             "draft_plan": plan.model_dump(),
             "iteration_count": iteration_count + 1,
@@ -156,6 +164,7 @@ async def curriculum_architect(state: PlannerState) -> dict:
         }
 
     except Exception as e:
+        logger.error("Architect: generation failed — %s", e, exc_info=True)
         return {
             "draft_plan": None,
             "iteration_count": iteration_count + 1,

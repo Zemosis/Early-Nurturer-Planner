@@ -15,6 +15,7 @@ Graph topology:
 """
 
 import json
+import logging
 import uuid
 
 from langgraph.graph import END, START, StateGraph
@@ -26,6 +27,8 @@ from app.agents.state import PlannerState
 from app.agents.tools import fetch_student_context, query_pedagogy
 from app.db.database import async_session_factory
 from app.db.models import AgentReasoningLog, CritiqueHistory, WeeklyPlan
+
+logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -43,6 +46,7 @@ async def fetch_context_node(state: PlannerState) -> dict:
     selected_theme = state.get("selected_theme", {})
     theme_name = selected_theme.get("name", "early childhood activities")
 
+    logger.info("FetchContext: fetching for user=%s, theme=%s", user_id, theme_name)
     try:
         student_ctx = await fetch_student_context(user_id)
         pedagogy_ctx = await query_pedagogy(
@@ -54,6 +58,7 @@ async def fetch_context_node(state: PlannerState) -> dict:
             "error": None,
         }
     except Exception as e:
+        logger.error("FetchContext: failed — %s", e, exc_info=True)
         return {
             "student_context": "No student data available.",
             "pedagogy_context": "No pedagogy data available.",
@@ -84,6 +89,8 @@ async def save_plan_node(state: PlannerState) -> dict:
     final_plan = personalized_plan or draft_plan
 
     if not final_plan:
+        logger.warning("Save: no plan available (personalized=%s, draft=%s)",
+                       personalized_plan is not None, draft_plan is not None)
         return {"error": "No plan available to save."}
 
     try:
@@ -167,6 +174,7 @@ def route_auditor(state: PlannerState) -> str:
     """
     # If there's an error in state, move forward to avoid infinite loops
     if state.get("error"):
+        logger.info("RouteAuditor: error in state, routing to personalize")
         return "personalize"
 
     audit_result = state.get("audit_result") or {}

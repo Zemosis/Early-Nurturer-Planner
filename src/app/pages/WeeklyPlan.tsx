@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Link, useParams, useNavigate } from "react-router";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router";
 import { ArrowLeft, MessageCircle } from "lucide-react";
 import { generateWeekPlan } from "../utils/mockData";
 import { ChatAssistant } from "../components/ChatAssistant";
@@ -12,7 +12,7 @@ import { DocumentationTab } from "../components/tabs/DocumentationTab";
 import { DailyScheduleTab } from "../components/tabs/DailyScheduleTab";
 import { ThemeSelectionHeader } from "../components/ThemeSelectionHeader";
 import { useTheme } from "../contexts/ThemeContext";
-import { getThemeByName } from "../utils/themeData";
+import { usePlanner } from "../contexts/PlannerContext";
 
 const tabs = [
   { id: "overview", label: "Overview" },
@@ -25,24 +25,24 @@ const tabs = [
 ];
 
 export default function WeeklyPlan() {
-  const { weekId } = useParams();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("overview");
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const week = generateWeekPlan(Number(weekId) || 1);
   const { setTheme, currentTheme } = useTheme();
+  const { currentPlan } = usePlanner();
 
-  // Apply theme colors when component mounts or week changes
-  useEffect(() => {
-    const themeDetail = getThemeByName(week.theme);
-    if (themeDetail) {
-      setTheme(themeDetail.id);
-    }
-  }, [week.theme, setTheme]);
+  // Use AI-generated plan if available, otherwise fall back to mock
+  const week = currentPlan ?? generateWeekPlan(1);
 
   const handleThemeChange = (themeId: string) => {
     setTheme(themeId);
   };
+
+  // If no plan and no mock, redirect to dashboard
+  if (!week) {
+    navigate("/");
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-background pb-20">

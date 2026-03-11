@@ -199,3 +199,129 @@
 * Implement real embedding + pgvector cosine search in `query_pedagogy()` (replace mock data).
 * Ingest pedagogy PDFs into `vector_store_curriculum`.
 * Add LangGraph checkpoint persistence using `agent_checkpoints` table for resume-on-failure.
+
+---
+
+## Phase 5: FastAPI Endpoints
+**Status:** Complete
+**Date:** March 11, 2026
+
+### Key Accomplishments
+
+* **Themes Router (`backend/app/api/routers/themes.py`):**
+    * `POST /api/themes/generate` — Accepts `user_id`, `child_ages`, `theme_count`. Fetches student context via `fetch_student_context()`, then calls `generate_theme_options()` to produce AI-generated themes. Returns the list of `ThemeSchema` objects directly.
+    * Error handling returns `500` with descriptive `detail` on failure.
+
+* **Planner Router (`backend/app/api/routers/planner.py`):**
+    * `POST /api/planner/generate` — Accepts `user_id`, `selected_theme`, `week_number`, `week_range`. Builds and invokes the full LangGraph pipeline via `build_planner_graph()`. Extracts `personalized_plan` (or falls back to `draft_plan`) from final state. Returns `{"status": "ok", "plan": {...}}`.
+    * Comprehensive logging: logs final state keys, presence of plan/error, and full error detail on failure.
+    * Error handling returns `500` with pipeline error message or generic fallback.
+
+* **FastAPI App (`backend/main.py`):**
+    * Registered both routers with `app.include_router()`.
+    * Added `logging.basicConfig(level=logging.INFO, format=...)` for visibility of agent pipeline logs in terminal.
+    * CORS middleware configured for `localhost:5173` / `localhost:5174` (Vite dev server).
+
+### Issues Encountered & Fixes
+
+* **Gemini 400 INVALID_ARGUMENT on `WeekPlanSchema`:** The deeply nested schema (4 levels: `WeekPlanSchema` → `DailyPlanSchema` → `ActivitySchema` → `AgeAdaptationSchema`) with `ge`/`le`, `min_length`/`max_length` constraints and `Literal` types exceeded Gemini's structured output complexity limit. The shallower `ThemeSchema` worked fine.
+    * **Fix:** Stripped all numeric bounds (`ge`, `le`), array length constraints (`min_length`, `max_length`), and replaced all `Literal["0-12m", ...]` types with plain `str` in `WeekPlanSchema` and its nested models. Moved expected values into `Field(description=...)` instead. Confirmed 200 OK with valid, complete plan output.
+    * **Lesson learned:** Gemini's `response_schema` rejects schemas with too many constraint states. Keep deep schemas constraint-free; enforce validation post-generation if needed.
+
+* **Silent pipeline failures:** Initial 500 errors gave no useful diagnostic info.
+    * **Fix:** Added structured logging to all 6 pipeline nodes (`fetch_context_node`, `curriculum_architect`, `safety_auditor`, `personalize_plan`, `save_plan_node`, `route_auditor`). Each logs entry/exit, Gemini call start/completion, validation results, and full error traces with `traceback.format_exc()`.
+
+### Files Created / Modified
+
+| File | Action |
+|---|---|
+| `backend/app/api/routers/themes.py` | Created — Themes generation endpoint |
+| `backend/app/api/routers/planner.py` | Created — Planner pipeline endpoint |
+| `backend/main.py` | Modified — Router registration, logging, CORS |
+| `backend/app/agents/schemas.py` | Modified — Removed constraints for Gemini compatibility |
+| `backend/app/agents/architect.py` | Modified — Added logging |
+| `backend/app/agents/auditor.py` | Modified — Added logging |
+| `backend/app/agents/personalizer.py` | Modified — Added logging |
+| `backend/app/agents/graph.py` | Modified — Added logging to fetch, save, route nodes |
+
+---
+
+## Phase 6: Frontend ↔ Backend Integration
+**Status:** In-Progress 
+**Date:** March 11, 2026
+
+### Key Accomplishments
+
+* **Vite Dev Proxy (`vite.config.ts`):**
+    * Added `server.proxy` config: all `/api/*` requests forward to `http://127.0.0.1:8000` with `changeOrigin: true`. Eliminates CORS issues during development.
+
+* **API Client (`src/app/utils/api.ts`):**
+    * `generateThemes(params?)` — `POST /api/themes/generate` with default `user_id`, `child_ages`, `theme_count`. Returns raw theme array.
+    * `generatePlan(params)` — `POST /api/planner/generate` with `selected_theme`, `week_number`, `week_range`. Returns `{status, plan}`.
+    * Both functions include error extraction from JSON response body with fallback to `statusText`.
+    * Hardcoded `DEFAULT_USER_ID` (`83b58b5f-...`) matches the seeded educator in the database.
+
+* **Response Transformers (`src/app/utils/apiTransformers.ts`):**
+    * `transformApiThemeToThemeDetail(api) → ThemeDetail` — Converts snake_case backend theme → camelCase frontend interface. Maps `palette`, `circle_time`, `activities`, and `environment` nested objects.
+    * `transformApiPlanToWeekPlan(api) → WeekPlan` — Converts snake_case backend plan → camelCase frontend interface. Key transformations:
+        * Flattens `daily_plans[].activities[]` → flat `activities[]` array (backend nests by day; frontend expects flat list).
+        * Maps `adaptations[].age_group` → `adaptations[].age` and `adaptations[].description` → `adaptations[].content`.
+        * Injects static data that the AI doesn't generate: yoga video URLs (mapped by pose name), music & movement videos (3 hardcoded entries with full `guidance` objects), greeting/goodbye song video URLs.
+    * `DEFAULT_YOGA_VIDEO_MAP` — 10 pose-name → YouTube embed URL mappings.
+    * `DEFAULT_MUSIC_MOVEMENT_VIDEOS` — 3 complete video objects (Freeze Dance, Head Shoulders, If You're Happy) with `howToConduct`, `whatToModel`, and `developmentFocus` guidance.
+
+* **Planner Context (`src/app/contexts/PlannerContext.tsx`):**
+    * New React context providing: `currentPlan` (`WeekPlan | null`), `themeOptions` (`ThemeDetail[]`), `isGenerating`, `error`.
+    * `<PlannerProvider>` wraps the entire app in `App.tsx` (outermost provider).
+
+* **Theme Context Updates (`src/app/contexts/ThemeContext.tsx`):**
+    * Added `setThemeFromDetail(detail: ThemeDetail)` — applies an arbitrary `ThemeDetail` as current theme (for AI-generated themes not in `themeLibrary`).
+    * Added `registerDynamicThemes(themes: ThemeDetail[])` — stores AI-generated themes so `previewTheme()` and `setTheme()` can look them up by ID.
+    * Internal `findTheme()` helper searches both `themeLibrary` and `dynamicThemes`.
+
+* **GenerateWeekModal Rewrite (`src/app/components/GenerateWeekModal.tsx`):**
+    * Replaced mock `getRandomThemes()` with real API flow. Four stages:
+        1. **`generating-themes`** — Spinner while `generateThemes()` API call runs. Message: "AI is crafting personalised themes for your classroom."
+        2. **`selection`** — Theme grid with shuffle button (calls `generateThemes()` again, with loading spinner on the button). Raw API theme objects stored in parallel array for sending back to planner.
+        3. **`generating-plan`** — Spinner while `generatePlan()` runs with the selected raw theme. Message: "Architect → Auditor → Personalizer pipeline is running. This may take up to 2 minutes."
+        4. **`error`** — Red alert icon with error message and "Try Again" button that restarts from theme generation.
+    * On success: calls `setCurrentPlan(plan)` and `onComplete()` to navigate to `/week/1`.
+    * Abort handling via `useRef` to prevent state updates on unmounted component.
+
+* **Dashboard Updates (`src/app/pages/Dashboard.tsx`):**
+    * Replaced hardcoded `currentWeek` import with `usePlanner().currentPlan`.
+    * Both mobile and desktop layouts now conditionally render the "current week" card based on `currentPlan` being non-null.
+    * Removed `useEffect` that applied theme from mock data on mount.
+
+* **WeeklyPlan Updates (`src/app/pages/WeeklyPlan.tsx`):**
+    * Uses `usePlanner().currentPlan` as primary data source, falls back to `generateWeekPlan(1)` mock data if no AI plan exists.
+    * Removed `useParams` dependency (plan comes from context, not URL param).
+    * Removed `useEffect` that looked up theme by name from static library.
+
+### Architecture Notes
+
+* **Data flow:** `GenerateWeekModal` → `api.generateThemes()` → user picks theme → `api.generatePlan()` → `apiTransformers.transformApiPlanToWeekPlan()` → `PlannerContext.setCurrentPlan()` → `Dashboard` and `WeeklyPlan` consume via `usePlanner()`.
+* **Static data injection:** The AI generates activity content but not media URLs. The transformer layer injects curated YouTube embeds for yoga poses, music videos, and songs. This keeps the AI focused on curriculum while ensuring media links are always valid.
+* **Graceful fallback:** `WeeklyPlan` falls back to mock data so the UI is never empty, even without a running backend.
+* **Theme system:** AI-generated themes are registered as "dynamic themes" in ThemeContext so the existing preview/selection infrastructure works without changes to `ThemeSelectionGrid` or `ThemeSelectionHeader`.
+
+### Files Created / Modified
+
+| File | Action |
+|---|---|
+| `src/app/utils/api.ts` | Created — API client |
+| `src/app/utils/apiTransformers.ts` | Created — Backend → frontend transformers |
+| `src/app/contexts/PlannerContext.tsx` | Created — Plan state management |
+| `vite.config.ts` | Modified — Dev proxy |
+| `src/app/App.tsx` | Modified — PlannerProvider wrapper |
+| `src/app/contexts/ThemeContext.tsx` | Modified — Dynamic theme support |
+| `src/app/components/GenerateWeekModal.tsx` | Modified — Full API integration rewrite |
+| `src/app/pages/Dashboard.tsx` | Modified — PlannerContext consumption |
+| `src/app/pages/WeeklyPlan.tsx` | Modified — PlannerContext consumption |
+
+### Next Steps
+* End-to-end testing with both servers running.
+* Implement real embedding + pgvector cosine search in `query_pedagogy()` (replace mock data).
+* Ingest pedagogy PDFs into `vector_store_curriculum`.
+* Add LangGraph checkpoint persistence using `agent_checkpoints` table for resume-on-failure.
+* Add plan persistence to localStorage or DB so plans survive page refresh.

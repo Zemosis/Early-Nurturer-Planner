@@ -14,6 +14,7 @@ This node does NOT mutate iteration_count — that is the Architect's job.
 """
 
 import json
+import logging
 
 from google import genai
 from google.genai import types
@@ -22,6 +23,8 @@ from pydantic import TypeAdapter
 from app.agents.schemas import AuditResultSchema
 from app.agents.state import PlannerState
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 # ── Gemini async client (Vertex AI mode) ──────────────────────
 gemini_client = genai.Client(
@@ -99,6 +102,7 @@ async def safety_auditor(state: PlannerState) -> dict:
     selected_theme = state.get("selected_theme", {})
 
     if not draft_plan:
+        logger.warning("Auditor: no draft_plan provided")
         return {
             "audit_result": {
                 "accepted": False,
@@ -126,6 +130,7 @@ async def safety_auditor(state: PlannerState) -> dict:
     )
 
     # ── Call Gemini with structured output ─────────────────────
+    logger.info("Auditor: evaluating draft plan")
     try:
         response = await gemini_client.aio.models.generate_content(
             model=GEMINI_MODEL,
@@ -155,6 +160,7 @@ async def safety_auditor(state: PlannerState) -> dict:
         }
 
     except Exception as e:
+        logger.error("Auditor: evaluation failed — %s", e, exc_info=True)
         return {
             "audit_result": None,
             "error": f"Auditor evaluation failed: {e}",

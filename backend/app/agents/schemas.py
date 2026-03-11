@@ -10,8 +10,6 @@ Frontend references:
   - src/app/types/activity.ts   — DetailedActivity, AgeAdaptation, Material
 """
 
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 
@@ -204,24 +202,18 @@ class AuditScores(BaseModel):
 
     safety: int = Field(
         ...,
-        ge=1,
-        le=10,
         description="Safety score (1–10). Evaluates whether materials, "
                     "activities, and environments are free from choking hazards, "
                     "sharp objects, toxic substances, and other risks for 0–36 month olds.",
     )
     developmental_fit: int = Field(
         ...,
-        ge=1,
-        le=10,
         description="Developmental appropriateness score (1–10). Evaluates "
                     "whether activities match the age groups present in the "
                     "classroom and support realistic milestones.",
     )
     creativity: int = Field(
         ...,
-        ge=1,
-        le=10,
         description="Creativity and engagement score (1–10). Evaluates "
                     "novelty, sensory richness, and likely child engagement.",
     )
@@ -287,10 +279,10 @@ class ObjectiveSchema(BaseModel):
 class AgeAdaptationSchema(BaseModel):
     """How to modify an activity for a specific age group."""
 
-    age_group: Literal["0-12m", "12-24m", "24-36m"] = Field(
+    age_group: str = Field(
         ...,
-        description="Target age band: '0-12m' (infants), '12-24m' (young "
-                    "toddlers), or '24-36m' (older toddlers).",
+        description="Target age band — must be one of: '0-12m' (infants), "
+                    "'12-24m' (young toddlers), or '24-36m' (older toddlers).",
     )
     description: str = Field(
         ...,
@@ -300,8 +292,7 @@ class AgeAdaptationSchema(BaseModel):
     )
     modifications: list[str] = Field(
         ...,
-        min_length=1,
-        description="Bullet-point list of concrete changes "
+        description="Bullet-point list of concrete changes (at least 1) "
                     "(e.g. ['Use larger beads', 'Reduce duration to 5 minutes', "
                     "'Offer soft alternatives']).",
     )
@@ -340,8 +331,6 @@ class ActivitySchema(BaseModel):
     )
     duration: int = Field(
         ...,
-        ge=5,
-        le=60,
         description="Planned duration in minutes (5–60). Keep infant activities "
                     "short (5–10 min) and toddler activities moderate (15–30 min).",
     )
@@ -358,8 +347,7 @@ class ActivitySchema(BaseModel):
     )
     materials: list[str] = Field(
         ...,
-        min_length=1,
-        description="List of required materials "
+        description="List of required materials (at least 1) "
                     "(e.g. ['Water table', 'Plastic cups', 'Blue food colouring']).",
     )
     safety_notes: str = Field(
@@ -370,15 +358,11 @@ class ActivitySchema(BaseModel):
     )
     adaptations: list[AgeAdaptationSchema] = Field(
         ...,
-        min_length=1,
-        max_length=3,
         description="1–3 age-group adaptations explaining how to modify this "
                     "activity for infants, young toddlers, and/or older toddlers.",
     )
     reflection_prompts: list[str] = Field(
         ...,
-        min_length=1,
-        max_length=3,
         description="1–3 prompts for the educator to reflect on after the "
                     "activity (e.g. 'Which children showed sustained interest?', "
                     "'Were adaptations sufficient for the youngest group?').",
@@ -420,8 +404,6 @@ class YogaPoseSchema(BaseModel):
     )
     duration: int = Field(
         ...,
-        ge=5,
-        le=60,
         description="Hold time in seconds (5–60). Keep short for younger children.",
     )
 
@@ -435,8 +417,7 @@ class CircleTimeSchema(BaseModel):
 
     letter: str = Field(
         ...,
-        max_length=1,
-        description="Letter of the week (e.g. 'R' for a rain theme).",
+        description="Single letter of the week (e.g. 'R' for a rain theme).",
     )
     color: str = Field(
         ...,
@@ -448,8 +429,6 @@ class CircleTimeSchema(BaseModel):
     )
     counting_to: int = Field(
         ...,
-        ge=1,
-        le=20,
         description="Number the class is counting up to this week (1–20).",
     )
     greeting_song: SongSchema = Field(
@@ -462,8 +441,6 @@ class CircleTimeSchema(BaseModel):
     )
     yoga_poses: list[YogaPoseSchema] = Field(
         ...,
-        min_length=2,
-        max_length=5,
         description="2–5 toddler-friendly yoga or movement poses tied to the theme.",
     )
     read_aloud: str = Field(
@@ -497,8 +474,6 @@ class DailyPlanSchema(BaseModel):
     )
     activities: list[ActivitySchema] = Field(
         ...,
-        min_length=1,
-        max_length=4,
         description="1–4 activities scheduled for this day, each targeting "
                     "the focus domain or supporting domains.",
     )
@@ -517,8 +492,6 @@ class NewsletterSchema(BaseModel):
     )
     learning_goals: list[str] = Field(
         ...,
-        min_length=2,
-        max_length=5,
         description="2–5 bullet points summarising what children practised "
                     "and learned this week.",
     )
@@ -558,7 +531,6 @@ class WeekPlanSchema(BaseModel):
     )
     week_number: int = Field(
         ...,
-        ge=1,
         description="Week number in the curriculum year (1-based).",
     )
     week_range: str = Field(
@@ -579,13 +551,11 @@ class WeekPlanSchema(BaseModel):
     )
     domains: list[str] = Field(
         ...,
-        min_length=2,
-        description="Developmental domains covered this week "
+        description="Developmental domains covered this week (at least 2) "
                     "(e.g. ['Fine Motor', 'Language', 'Sensory', 'Gross Motor']).",
     )
     objectives: list[ObjectiveSchema] = Field(
         ...,
-        min_length=2,
         description="2+ developmental objectives for the week, each tied to a domain.",
     )
     circle_time: CircleTimeSchema = Field(
@@ -595,8 +565,6 @@ class WeekPlanSchema(BaseModel):
     )
     daily_plans: list[DailyPlanSchema] = Field(
         ...,
-        min_length=5,
-        max_length=5,
         description="Exactly 5 daily plans (Monday through Friday), each with "
                     "a focus domain and 1–4 activities.",
     )

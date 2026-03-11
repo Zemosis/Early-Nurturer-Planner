@@ -11,6 +11,7 @@ It only enriches adaptations and descriptions.
 """
 
 import json
+import logging
 
 from google import genai
 from google.genai import types
@@ -19,6 +20,8 @@ from pydantic import TypeAdapter
 from app.agents.schemas import WeekPlanSchema
 from app.agents.state import PlannerState
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 # ── Gemini async client (Vertex AI mode) ──────────────────────
 gemini_client = genai.Client(
@@ -96,6 +99,7 @@ async def personalize_plan(state: PlannerState) -> dict:
 
     # ── Guard: no plan to personalise ─────────────────────────
     if not draft_plan:
+        logger.warning("Personalizer: no draft_plan provided")
         return {
             "personalized_plan": None,
             "error": "No draft plan available to personalize.",
@@ -103,6 +107,7 @@ async def personalize_plan(state: PlannerState) -> dict:
 
     # ── Guard: plan was not accepted by auditor ───────────────
     if audit_result and not audit_result.get("accepted", False):
+        logger.warning("Personalizer: plan was rejected by auditor, skipping")
         return {
             "personalized_plan": None,
             "error": "Cannot personalize a plan that was rejected by the Safety Auditor.",
@@ -132,6 +137,7 @@ async def personalize_plan(state: PlannerState) -> dict:
     )
 
     # ── Call Gemini with structured output ─────────────────────
+    logger.info("Personalizer: calling Gemini")
     try:
         response = await gemini_client.aio.models.generate_content(
             model=GEMINI_MODEL,
@@ -161,6 +167,7 @@ async def personalize_plan(state: PlannerState) -> dict:
         }
 
     except Exception as e:
+        logger.error("Personalizer: failed — %s", e, exc_info=True)
         return {
             "personalized_plan": None,
             "error": f"Personalization failed: {e}",
