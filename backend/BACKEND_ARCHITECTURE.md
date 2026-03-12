@@ -135,7 +135,7 @@ Triggers the full multi-agent LangGraph pipeline.
 **Flow:**
 1. Compiles LangGraph via `build_planner_graph()`
 2. Invokes with initial state
-3. Pipeline: `fetch_context → architect → auditor → (revise loop) → youtube_enricher → personalizer → save`
+3. Pipeline: `fetch_context → architect → auditor → (revise loop) → personalizer → youtube_enricher → save`
 4. Returns `personalized_plan` or falls back to `draft_plan`
 
 **Response:**

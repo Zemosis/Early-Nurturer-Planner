@@ -127,8 +127,7 @@ Generated curriculum plans — stores the full plan payload as JSONB.
 | `updated_at` | TIMESTAMPTZ | | |
 
 **Index:** `ix_weekly_plans_user_week` on `(user_id, week_number)`
-
-⚠️ **Known Bug:** No unique constraint on `(user_id, week_number)` — multiple plans accumulate for the same week. Needs upsert fix. See `dev-log.md`.
+**Constraint:** `UniqueConstraint("user_id", "week_number", name="uq_weekly_plans_user_week")` — enforces one plan per user per week. `save_plan_node` upserts (UPDATE if exists, INSERT if not). Migration: `023b423663bf`.
 
 ---
 

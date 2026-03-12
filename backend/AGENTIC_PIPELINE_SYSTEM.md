@@ -33,23 +33,26 @@ START
  (& iter<3)  (or iter≥3)
     │         │
     ▼         ▼
-  architect  ┌──────────────────┐
-  (retry)    │ youtube_enricher  │  Real YouTube videos for songs & yoga
+  architect  ┌─────────────────┐
+  (retry)    │  personalizer    │  Child-specific names & strategies (temp 0.5)
+             └────────┬────────┘
+                      │
+                      ▼
+             ┌──────────────────┐
+             │ youtube_enricher  │  Real YouTube videos for songs & yoga
              └────────┬─────────┘
                       │
                       ▼
              ┌─────────────────┐
-             │  personalizer    │  Child-specific names & strategies (temp 0.5)
-             └────────┬────────┘
-                      │
-                      ▼
-             ┌─────────────────┐
-             │     save         │  Persists plan, critique, logs to Postgres
+             │     save         │  Upserts plan, critique, logs to Postgres
              └────────┬────────┘
                       │
                       ▼
                      END
 ```
+
+> **Note:** YouTube enrichment runs **after** personalization so that `youtube_url` fields
+> (not part of `WeekPlanSchema`) survive — Gemini would otherwise drop them.
 
 ---
 
@@ -145,42 +148,7 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 
 ---
 
-### 4. YouTube Enricher (`youtube_enricher.py`)
-
-**Purpose:** Replace AI-generated fictional song/pose titles with real YouTube video metadata.
-
-**Runs:** Once, after the Auditor loop completes (not on every revision).
-
-**Query construction:**
-- **Greeting songs:** `"good morning hello circle time song toddlers kids {theme}"`
-- **Goodbye songs:** `"goodbye song circle time toddlers kids {theme}"`
-- **Yoga poses:** Maps AI creative names → standard poses via `_YOGA_POSE_MAP` (e.g. "seed" → "seed to tree"), then `"{standard_pose} yoga for kids toddlers"`
-
-**Yoga Pose Map (14 entries):**
-| AI Keyword | Standard Search Term |
-|---|---|
-| tree | tree pose |
-| cat / cow | cat cow pose |
-| butterfly | butterfly pose |
-| cobra | cobra pose |
-| downward / dog | downward dog |
-| child | child's pose |
-| mountain | mountain pose |
-| warrior | warrior pose |
-| star | star pose |
-| flower | flower pose |
-| frog | frog pose |
-| seed / sprout | seed to tree |
-
-**Metadata overwrite:**
-- Songs: overwrites `title`, `duration`, injects `youtube_url`
-- Yoga: overwrites `name`, `duration` (uses `duration_seconds`), injects `youtube_url`
-
-**Concurrency:** All searches fire in parallel via `asyncio.gather()`.
-
----
-
-### 5. Personalizer (`personalizer.py`)
+### 4. Personalizer (`personalizer.py`)
 
 **Purpose:** Weave child-specific names, strategies, and developmental references into the approved plan.
 
@@ -212,16 +180,54 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 
 ---
 
+### 5. YouTube Enricher (`youtube_enricher.py`)
+
+**Purpose:** Replace AI-generated fictional song/pose titles with real YouTube video metadata.
+
+**Runs:** Once, **after personalization** (not before). This is critical because `SongSchema` and `YogaPoseSchema` have no `youtube_url` field — if the enricher ran before the Personalizer, Gemini's structured output would drop all YouTube data.
+
+**Reads:** `personalized_plan` first, falls back to `draft_plan`.
+
+**Query construction:**
+- `_extract_theme_keyword(theme)` — pulls one concrete noun from the theme name ("Busy Bees" → `bee`, "Fox Forest" → `fox`, "Bug Express" → `bug`). Skips filler words, de-pluralises.
+- **Greeting songs:** `"good morning {keyword} song for toddlers"`
+- **Goodbye songs:** `"goodbye {keyword} song for toddlers"`
+- **Yoga poses:** Maps AI creative names → standard poses via `_YOGA_POSE_MAP` (e.g. "seed" → "seed to tree"), then `"{standard_pose} yoga for kids toddlers"`
+
+**Yoga Pose Map (14 entries):**
+| AI Keyword | Standard Search Term |
+|---|---|
+| tree | tree pose |
+| cat / cow | cat cow pose |
+| butterfly | butterfly pose |
+| cobra | cobra pose |
+| downward / dog | downward dog |
+| child | child's pose |
+| mountain | mountain pose |
+| warrior | warrior pose |
+| star | star pose |
+| flower | flower pose |
+| frog | frog pose |
+| seed / sprout | seed to tree |
+
+**Metadata overwrite:**
+- Songs: overwrites `title`, `duration`, injects `youtube_url`
+- Yoga: overwrites `name`, `duration` (uses `duration_seconds`), injects `youtube_url`
+
+**Concurrency:** All searches fire in parallel via `asyncio.gather()`.
+
+---
+
 ### 6. Save Plan (`graph.py → save_plan_node`)
 
 **Purpose:** Persist the final plan, critique history, and reasoning log to PostgreSQL.
 
 **Writes to 3 tables:**
-1. `weekly_plans` — Final plan (prefers `personalized_plan`, falls back to `draft_plan`). Flattens `daily_plans[].activities[]` → single activities list.
+1. `weekly_plans` — **Upserts** final plan (prefers `personalized_plan`, falls back to `draft_plan`). Queries by `(user_id, week_number)` — if exists, updates all columns in place; otherwise inserts new row. Flattens `daily_plans[].activities[]` → single activities list.
 2. `critique_history` — Auditor scores, critique, accepted flag
 3. `agent_reasoning_logs` — Pipeline completion summary
 
-**Known bug:** Currently always INSERTs — needs upsert logic for "One Plan Per Week Per User" rule. See dev-log.md.
+**Constraint:** `UniqueConstraint("user_id", "week_number")` enforces one plan per user per week at the DB level.
 
 ---
 
@@ -230,7 +236,7 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 **Purpose:** Conditional edge that decides whether to revise or proceed.
 
 **Returns:**
-- `"personalize"` → if accepted, iteration cap (≥3) reached, or error present
+- `"personalize"` → routes to personalizer if accepted, iteration cap (≥3) reached, or error present
 - `"revise"` → if rejected and iterations remain
 
 ---
@@ -296,6 +302,6 @@ All three Gemini-calling agents use `response_schema` with Pydantic models. This
 | `fetch_student_context(user_id)` | Query enrolled students, return LLM-formatted roster |
 | `generate_theme_options(context, count)` | Call Gemini to generate ThemeSchema list |
 | `query_pedagogy(query_text)` | RAG search (currently mock keyword matching) |
-| `search_youtube_video(query, video_category_id?)` | Search YouTube API, return metadata dict |
+| `search_youtube_video(query, video_category_id?)` | Search YouTube API (5 results), prefer trusted channels, return metadata dict |
 | `_parse_iso8601_duration(iso)` | Convert `PT3M8S` → `("3:08", 188)` |
-| `_clean_youtube_title(raw)` | Strip channel suffixes from video titles |
+| `_clean_youtube_title(raw)` | Strip hashtags, HTML entities, Unicode junk, channel suffixes |

@@ -398,31 +398,97 @@ The frontend was injecting **static, hardcoded** YouTube URLs for songs and yoga
 
 ---
 
-## Phase 8: Strict YouTube Query Enforcement
-**Status:** Planned
-**Date:** March 11, 2026
+## Phase 8: YouTube Pipeline Fix + DB Upsert + Frontend Theme Fix
+**Status:** Complete
+**Date:** March 12, 2026
 
 ### Problem Statement
 
-YouTube Data API is returning **mainstream adult music** (e.g. Peter, Paul & Mary wedding songs, The Manhattans R&B) instead of toddler circle time content. The current query strings are too weak — `"good morning hello circle time song toddlers kids Starry Night Dreamers"` doesn't force YouTube's algorithm to target early childhood content.
+Three related issues reported after deployment:
 
-### Planned Fix
+1. **YouTube videos not embedding:** Greeting song, goodbye song, and yoga pose sections showed blank iframes with dirty titles containing hashtags (`#kidssongs`), HTML entities (`&amp;`), and Unicode junk (`≡♥`). Videos were not clickable or playable.
+2. **Plans accumulating in DB:** Every plan generation INSERT'd a new row into `weekly_plans` — no upsert. 10+ duplicate rows piled up for the same user + week.
+3. **Fox Forest theme always applied:** After generating new themes, the ThemeContext silently defaulted to the static Fox Forest theme instead of the user's AI-generated selection.
 
-Rewrite query construction in `tools.py` and `youtube_enricher.py` with strict scaffolding:
+### Root Cause Analysis
 
-* **Audience keywords:** `toddler OR preschool OR kindergarten OR 'kids song'`
-* **Negative keywords:** `-wedding -live -cover -'official video' -R&B -pop -remix -karaoke`
-* **Trusted channel bias:** `('Super Simple Songs' OR 'The Singing Walrus' OR 'Kiboomers' OR 'Cocomelon' OR 'Pinkfong')` for songs; `('Cosmic Kids' OR 'Yoga for Kids')` for yoga
-* Add `search_type` parameter to `search_youtube_video()` (`'greeting'`, `'goodbye'`, `'yoga'`)
-* Move query construction logic into `tools.py` (out of enricher)
+**YouTube (Critical):** The pipeline order was `youtube_enricher → personalizer → save`. The enricher injected `youtube_url` into `draft_plan`, but the Personalizer then called Gemini with `response_schema=WeekPlanSchema` — which has **no `youtube_url` field** on `SongSchema` or `YogaPoseSchema`. Gemini's structured output silently dropped all YouTube data. The saved `personalized_plan` had empty URLs.
 
-See plan: `.windsurf/plans/strict-youtube-queries-ea416b.md`
+Additionally, `_clean_youtube_title` only split on `|`/`-`/`/` separators without stripping hashtags, HTML entities, or Unicode control characters.
+
+Search queries were too verbose (e.g. `"good morning hello circle time song toddlers kids Starry Night Dreamers"`) — too many keywords confused YouTube's algorithm, returning irrelevant results. Only 1 result was fetched (`maxResults=1`) with no channel quality filtering.
+
+**DB Upsert:** `save_plan_node` always called `session.add(WeeklyPlan(...))` (INSERT). The index on `(user_id, week_number)` had no unique constraint, so duplicates accumulated silently.
+
+**Fox Forest Theme:** In `GenerateWeekModal.tsx`, `registerDynamicThemes(transformed)` and `setTheme(transformed[0].id)` ran in the same synchronous block. React hadn't flushed the `dynamicThemes` state update yet, so `findTheme(id)` read stale state → returned `undefined` → `setTheme` silently no-op'd → `currentTheme` stayed as `themeLibrary[0]` = Fox Forest.
+
+### Fixes Applied
+
+#### 1. Pipeline Reorder (`graph.py`)
+
+Moved `youtube_enricher` to run **after** `personalizer`:
+```
+fetch_context → architect → auditor → (revise loop)
+                                            ↓
+                               personalizer → youtube_enricher → save → END
+```
+YouTube URLs are now injected into the **final** plan (after all Gemini calls), so they're never lost.
+
+#### 2. Enricher Updated (`youtube_enricher.py`)
+
+- Now reads `personalized_plan` first, falls back to `draft_plan`
+- Returns the correct state key (`personalized_plan` or `draft_plan`)
+- **Concise song queries with theme keyword:**
+  - New helper `_extract_theme_keyword(theme)` pulls one concrete noun: "Busy Bees" → `bee`, "Fox Forest" → `fox`, "Bug Express" → `bug`
+  - Greeting: `"good morning {keyword} song for toddlers"` (was: `"good morning hello circle time song toddlers kids {full theme name}"`)
+  - Goodbye: `"goodbye {keyword} song for toddlers"`
+  - De-pluralises simple cases: bees→bee, foxes→fox, butterflies→butterfly
+  - Skips generic filler words (little, busy, bright, friendly, friends, etc.)
+
+#### 3. YouTube Search Improvements (`tools.py`)
+
+- **`_clean_youtube_title` rewritten:**
+  1. HTML-unescapes (`&amp;` → `&`)
+  2. Strips hashtag blocks (`#kidssongs #nurseryrhymes`)
+  3. Strips Unicode box-drawing / dingbats / musical symbols (U+2300–27FF)
+  4. Splits on `|`, `/`, `–`, `—`, `-` separators
+  5. Returns first segment ≥ 5 chars
+
+- **Trusted channel scoring:**
+  - `maxResults` increased from 1 → 5
+  - Scores each result: bonus for trusted kids channels (Super Simple Songs, The Kiboomers, Cosmic Kids Yoga, GoNoodle, Pinkfong, CoComelon, Jack Hartmann, The Singing Walrus, Bounce Patrol, Little Baby Bum, Sesame Street, Dave and Ava, Badanamu)
+  - Picks highest-scored result (falls back to first result if no trusted match)
+
+#### 4. DB Upsert Fix (`graph.py` + `models.py`)
+
+- `save_plan_node` now queries for existing plan by `(user_id, week_number)` first:
+  - If found → **UPDATE** all columns in place
+  - If not → **INSERT** new row
+- Added `UniqueConstraint("user_id", "week_number", name="uq_weekly_plans_user_week")` to `WeeklyPlan` model
+- Generated and applied Alembic migration (`023b423663bf`)
+- Cleaned up 10 duplicate rows from production DB (kept newest per user+week)
+
+#### 5. Frontend Theme Fix (`GenerateWeekModal.tsx`)
+
+- Replaced `setTheme(id)` (stale lookup) with `setThemeFromDetail(themeObject)` (bypasses ID lookup)
+- Fixed in 3 call sites: `fetchThemes`, `handleShuffle`, `handleSelectTheme`
+
+### Files Created / Modified
+
+| File | Action |
+|---|---|
+| `backend/app/agents/graph.py` | Pipeline reorder + upsert in `save_plan_node` + `select` import |
+| `backend/app/agents/youtube_enricher.py` | Read `personalized_plan` first; simplified queries; `_extract_theme_keyword` |
+| `backend/app/agents/tools.py` | Rewrote `_clean_youtube_title`; trusted channel scoring; `maxResults=5`; `html` import |
+| `backend/app/db/models.py` | Added `UniqueConstraint` + `UniqueConstraint` import |
+| `backend/alembic/versions/023b423663bf_...py` | Migration: unique constraint on `(user_id, week_number)` |
+| `src/app/components/GenerateWeekModal.tsx` | `setThemeFromDetail` replaces `setTheme` (3 call sites) |
 
 ---
 
 ## Known Bug: Database Collision — Stale Plan Loaded on Re-generation
-**Status:** Open — Fix Required
-**Date:** March 11, 2026
+**Status:** ✅ Resolved (Phase 8)
+**Date:** March 11, 2026 (reported) → March 12, 2026 (fixed)
 **Severity:** Critical
 
 ### Symptom
@@ -431,29 +497,8 @@ When a user generates multiple themes for the same week (e.g. Week 1 "Fox Forest
 
 ### Root Cause
 
-`save_plan_node` in `graph.py` always **inserts a new row** into `weekly_plans`:
+`save_plan_node` in `graph.py` always **inserted a new row** into `weekly_plans`. The DB had an index on `(user_id, week_number)` but **no unique constraint**, so multiple rows accumulated for the same user + week.
 
-```python
-weekly_plan = WeeklyPlan(...)
-session.add(weekly_plan)  # Always INSERT, never UPDATE
-```
+### Fix Applied
 
-The DB has an index on `(user_id, week_number)` but **no unique constraint**, so multiple rows accumulate for the same user + week. The frontend fetches by `user_id` and `week_number` and gets the oldest row (first inserted).
-
-### Required Fix: Upsert (One Plan Per Week Per User)
-
-1. **Add unique constraint** on `(user_id, week_number)` in the `weekly_plans` table (Alembic migration).
-2. **Change `save_plan_node`** from `session.add()` to an upsert pattern:
-    * Query for existing plan: `SELECT ... WHERE user_id = ? AND week_number = ?`
-    * If exists → **UPDATE** all columns (theme, circle_time, activities, etc.)
-    * If not → **INSERT** new row
-    * Alternative: Use PostgreSQL `INSERT ... ON CONFLICT (user_id, week_number) DO UPDATE SET ...`
-3. **Frontend** may need no changes if it already fetches the single row for a week.
-
-### Files to Modify
-
-| File | Change |
-|---|---|
-| `backend/app/db/models.py` | Change index to `UniqueConstraint("user_id", "week_number")` |
-| `backend/app/agents/graph.py` | Change `save_plan_node` to upsert logic |
-| `backend/alembic/versions/` | New migration for unique constraint |
+See Phase 8, section 4 above. Upsert logic + unique constraint + Alembic migration + duplicate cleanup.
