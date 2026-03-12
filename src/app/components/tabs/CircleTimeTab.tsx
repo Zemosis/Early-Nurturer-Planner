@@ -85,7 +85,7 @@ export function CircleTimeTab({ week }: CircleTimeTabProps) {
           </div>
 
           <div className="p-4 bg-muted/5">
-            <p className="text-xs font-medium text-muted-foreground mb-2">Lyrics</p>
+            <p className="text-xs font-medium text-muted-foreground mb-2">Educator Script</p>
             <pre className="text-sm text-foreground whitespace-pre-wrap font-sans">
               {week.circleTime.greetingSong.script}
             </pre>
@@ -123,7 +123,7 @@ export function CircleTimeTab({ week }: CircleTimeTabProps) {
           </div>
 
           <div className="p-4 bg-muted/5">
-            <p className="text-xs font-medium text-muted-foreground mb-2">Lyrics</p>
+            <p className="text-xs font-medium text-muted-foreground mb-2">Educator Script</p>
             <pre className="text-sm text-foreground whitespace-pre-wrap font-sans">
               {week.circleTime.goodbyeSong.script}
             </pre>

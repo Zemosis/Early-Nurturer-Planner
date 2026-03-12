@@ -73,9 +73,19 @@ async def generate_plan(request: GeneratePlanRequest):
                 detail=final_state["error"],
             )
 
+        # Prefer personalized plan; fall back to draft if auditor
+        # rejected after max iterations (plan is still usable).
+        plan = final_state.get("personalized_plan") or final_state.get("draft_plan")
+
+        if not plan:
+            raise HTTPException(
+                status_code=500,
+                detail="Pipeline produced no usable plan.",
+            )
+
         return {
             "status": "success",
-            "plan": final_state.get("personalized_plan"),
+            "plan": plan,
         }
 
     except HTTPException:

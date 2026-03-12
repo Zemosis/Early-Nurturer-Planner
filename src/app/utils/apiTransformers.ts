@@ -194,14 +194,14 @@ export function transformApiPlanToWeekPlan(api: any): WeekPlan {
   const greetingSong = {
     title: ct.greeting_song?.title ?? "Good Morning",
     script: ct.greeting_song?.script ?? "",
-    videoUrl: "",
+    videoUrl: ct.greeting_song?.youtube_url ?? "",
     duration: ct.greeting_song?.duration ?? "2:00",
   };
 
   const goodbyeSong = {
     title: ct.goodbye_song?.title ?? "Goodbye",
     script: ct.goodbye_song?.script ?? "",
-    videoUrl: "",
+    videoUrl: ct.goodbye_song?.youtube_url ?? "",
     duration: ct.goodbye_song?.duration ?? "1:30",
   };
 
@@ -210,7 +210,7 @@ export function transformApiPlanToWeekPlan(api: any): WeekPlan {
     return {
       id: `yoga-${idx}`,
       name: yp.name,
-      videoUrl: DEFAULT_YOGA_VIDEO_MAP[nameLower] ?? "",
+      videoUrl: yp.youtube_url ?? DEFAULT_YOGA_VIDEO_MAP[nameLower] ?? "",
       benefits: yp.benefits,
       duration: yp.duration ?? 15,
     };

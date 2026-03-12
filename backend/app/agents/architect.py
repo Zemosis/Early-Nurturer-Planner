@@ -11,6 +11,7 @@ injected into the prompt so the Architect can fix rejected issues.
 
 import json
 import logging
+import re
 
 from google import genai
 from google.genai import types
@@ -30,6 +31,10 @@ gemini_client = genai.Client(
 )
 
 GEMINI_MODEL = "gemini-2.5-flash"
+
+# Matches lone Unicode surrogate escapes (\uD800–\uDFFF) that Gemini
+# sometimes emits and that break strict JSON parsers.
+_SURROGATE_RE = re.compile(r'\\u[dD][89a-fA-F][0-9a-fA-F]{2}')
 
 # ── System prompt ─────────────────────────────────────────────
 
@@ -138,6 +143,7 @@ async def curriculum_architect(state: PlannerState) -> dict:
                 response_mime_type="application/json",
                 response_schema=WeekPlanSchema,
                 temperature=0.9,
+                max_output_tokens=65536,
             ),
         )
 
@@ -152,13 +158,19 @@ async def curriculum_architect(state: PlannerState) -> dict:
 
         logger.info("Architect: received %d chars, validating schema", len(raw_text))
 
+        # Sanitize lone surrogate escapes before parsing
+        raw_text = _SURROGATE_RE.sub('', raw_text)
+
         # Validate through Pydantic
         adapter = TypeAdapter(WeekPlanSchema)
         plan = adapter.validate_json(raw_text)
 
         logger.info("Architect: plan validated successfully")
+
+        plan_dict = plan.model_dump()
+
         return {
-            "draft_plan": plan.model_dump(),
+            "draft_plan": plan_dict,
             "iteration_count": iteration_count + 1,
             "error": None,
         }

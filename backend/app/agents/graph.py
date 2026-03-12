@@ -23,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from app.agents.architect import curriculum_architect
 from app.agents.auditor import safety_auditor
 from app.agents.personalizer import personalize_plan
+from app.agents.youtube_enricher import youtube_enricher
 from app.agents.state import PlannerState
 from app.agents.tools import fetch_student_context, query_pedagogy
 from app.db.database import async_session_factory
@@ -212,6 +213,7 @@ def build_planner_graph():
     builder.add_node("fetch_context", fetch_context_node)
     builder.add_node("architect", curriculum_architect)
     builder.add_node("auditor", safety_auditor)
+    builder.add_node("youtube_enricher", youtube_enricher)
     builder.add_node("personalizer", personalize_plan)
     builder.add_node("save", save_plan_node)
 
@@ -222,8 +224,9 @@ def build_planner_graph():
     builder.add_conditional_edges(
         "auditor",
         route_auditor,
-        {"personalize": "personalizer", "revise": "architect"},
+        {"personalize": "youtube_enricher", "revise": "architect"},
     )
+    builder.add_edge("youtube_enricher", "personalizer")
     builder.add_edge("personalizer", "save")
     builder.add_edge("save", END)
 

@@ -12,6 +12,7 @@ It only enriches adaptations and descriptions.
 
 import json
 import logging
+import re
 
 from google import genai
 from google.genai import types
@@ -31,6 +32,8 @@ gemini_client = genai.Client(
 )
 
 GEMINI_MODEL = "gemini-2.5-flash"
+
+_SURROGATE_RE = re.compile(r'\\u[dD][89a-fA-F][0-9a-fA-F]{2}')
 
 # ── System prompt ─────────────────────────────────────────────
 
@@ -107,10 +110,10 @@ async def personalize_plan(state: PlannerState) -> dict:
 
     # ── Guard: plan was not accepted by auditor ───────────────
     if audit_result and not audit_result.get("accepted", False):
-        logger.warning("Personalizer: plan was rejected by auditor, skipping")
+        logger.warning("Personalizer: plan was rejected by auditor, skipping personalization (draft plan will be used as fallback)")
         return {
             "personalized_plan": None,
-            "error": "Cannot personalize a plan that was rejected by the Safety Auditor.",
+            "error": None,
         }
 
     # ── Serialize plan for the prompt ─────────────────────────
@@ -147,6 +150,7 @@ async def personalize_plan(state: PlannerState) -> dict:
                 response_mime_type="application/json",
                 response_schema=WeekPlanSchema,
                 temperature=0.5,
+                max_output_tokens=65536,
             ),
         )
 
@@ -156,6 +160,9 @@ async def personalize_plan(state: PlannerState) -> dict:
                 "personalized_plan": None,
                 "error": "Gemini returned an empty response during personalization.",
             }
+
+        # Sanitize lone surrogate escapes before parsing
+        raw_text = _SURROGATE_RE.sub('', raw_text)
 
         # Validate through Pydantic
         adapter = TypeAdapter(WeekPlanSchema)

@@ -55,6 +55,12 @@ class Settings(BaseSettings):
         description="GCP region for Vertex AI API calls",
     )
 
+    # ── YouTube Data API ──────────────────────────────────────
+    YOUTUBE_API_KEY: str = Field(
+        default="",
+        description="YouTube Data API v3 key for fetching real video embed URLs",
+    )
+
     @field_validator("GOOGLE_APPLICATION_CREDENTIALS")
     @classmethod
     def credentials_file_must_exist(cls, v: str) -> str:

@@ -7,8 +7,11 @@ retrieve live data (students, plans, embeddings) and call Gemini for
 curriculum generation and personalisation.
 """
 
+import logging
 import uuid
+from urllib.parse import quote_plus
 
+import httpx
 from google import genai
 from google.genai import types
 from pydantic import TypeAdapter
@@ -18,6 +21,8 @@ from app.agents.schemas import ThemeSchema
 from app.db.database import async_session_factory
 from app.db.models import Student
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 # ── Gemini async client (Vertex AI mode) ──────────────────────
 gemini_client = genai.Client(
@@ -274,3 +279,125 @@ async def query_pedagogy(query_text: str) -> str:
         "months) and grounded in observation-based planning. Rotate materials "
         "weekly to sustain interest and challenge."
     )
+
+
+# ── YouTube Data API v3 ──────────────────────────────────────
+
+YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
+YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
+
+
+def _parse_iso8601_duration(iso: str) -> tuple[str, int]:
+    """Convert ISO 8601 duration (e.g. 'PT3M8S') to ('M:SS', total_seconds)."""
+    import re as _re
+    m = _re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", iso or "")
+    if not m:
+        return "0:00", 0
+    hours = int(m.group(1) or 0)
+    minutes = int(m.group(2) or 0) + hours * 60
+    seconds = int(m.group(3) or 0)
+    total = minutes * 60 + seconds
+    return f"{minutes}:{seconds:02d}", total
+
+
+def _clean_youtube_title(raw_title: str) -> str:
+    """Strip channel / metadata suffixes from a YouTube title.
+
+    e.g. 'Goodbye Song for Children - Children's Goodbye Song - ...'
+    becomes 'Goodbye Song for Children'.
+    Keeps the first meaningful segment before common separators.
+    """
+    import re as _re
+    # Split on common separators: |, -, /, and keep the first segment
+    # that is at least 8 chars. This avoids cutting "Cat-Cow" style names.
+    parts = _re.split(r'\s+[\|/]\s+|\s+-\s+', raw_title)
+    # Return the first non-trivial segment
+    for part in parts:
+        cleaned = part.strip()
+        if len(cleaned) >= 8:
+            return cleaned
+    return raw_title.strip()
+
+
+async def search_youtube_video(
+    query: str,
+    video_category_id: str | None = None,
+) -> dict | None:
+    """Search YouTube for a kid-safe video and return full metadata.
+
+    Hits the YouTube Data API v3 search endpoint, then fetches video
+    details (duration) from the videos endpoint. Returns a dict with
+    embed_url, title, duration, and thumbnail — or None on failure.
+
+    Args:
+        query: A search query string (e.g. 'goodbye song circle time
+               toddlers' or 'tree pose yoga for kids').
+        video_category_id: Optional YouTube category filter (e.g. '10'
+               for Music). Omit for broader results.
+
+    Returns:
+        A dict ``{embed_url, title, duration, duration_seconds,
+        thumbnail}`` or None.
+    """
+    api_key = settings.YOUTUBE_API_KEY
+    if not api_key:
+        logger.warning("YouTube search skipped — YOUTUBE_API_KEY not set")
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            # 1. Search for the video
+            params = {
+                "part": "snippet",
+                "maxResults": 1,
+                "q": query,
+                "type": "video",
+                "safeSearch": "strict",
+                "key": api_key,
+            }
+            if video_category_id:
+                params["videoCategoryId"] = video_category_id
+            search_resp = await client.get(YOUTUBE_SEARCH_URL, params=params)
+            search_resp.raise_for_status()
+            items = search_resp.json().get("items", [])
+
+            if not items:
+                logger.warning("YouTube: 0 results for '%s'", query)
+                return None
+
+            snippet = items[0]["snippet"]
+            video_id = items[0]["id"]["videoId"]
+
+            # 2. Get real duration from videos endpoint
+            detail_resp = await client.get(
+                YOUTUBE_VIDEOS_URL,
+                params={
+                    "part": "contentDetails",
+                    "id": video_id,
+                    "key": api_key,
+                },
+            )
+            detail_resp.raise_for_status()
+            detail_items = detail_resp.json().get("items", [])
+
+            iso_duration = ""
+            if detail_items:
+                iso_duration = detail_items[0]["contentDetails"].get("duration", "")
+
+        title = _clean_youtube_title(snippet.get("title", ""))
+        duration, duration_seconds = _parse_iso8601_duration(iso_duration)
+        thumb = (snippet.get("thumbnails") or {}).get("high", {}).get("url", "")
+        embed_url = f"https://www.youtube.com/embed/{video_id}"
+
+        logger.info("YouTube: '%s' → %s (%s) [%s]", query, title, duration, embed_url)
+        return {
+            "embed_url": embed_url,
+            "title": title,
+            "duration": duration,
+            "duration_seconds": duration_seconds,
+            "thumbnail": thumb,
+        }
+
+    except Exception as e:
+        logger.warning("YouTube search failed for '%s': %s", query, e)
+        return None

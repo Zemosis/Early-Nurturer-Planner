@@ -325,3 +325,135 @@
 * Ingest pedagogy PDFs into `vector_store_curriculum`.
 * Add LangGraph checkpoint persistence using `agent_checkpoints` table for resume-on-failure.
 * Add plan persistence to localStorage or DB so plans survive page refresh.
+
+---
+
+## Phase 7: YouTube Video Integration & Enricher Agent
+**Status:** In-Progress 
+**Date:** March 11, 2026
+
+### Problem Statement
+
+The frontend was injecting **static, hardcoded** YouTube URLs for songs and yoga poses via `apiTransformers.ts`. AI-generated song titles (e.g. "Hello, Little Garden Friends") had no corresponding real video. Titles, lyrics, durations, and yoga pose names displayed in the UI were entirely fictional — they didn't match any real YouTube content.
+
+### Key Accomplishments
+
+* **YouTube Data API v3 Integration (`backend/app/agents/tools.py`):**
+    * Added `httpx` dependency and `YOUTUBE_API_KEY` to `config.py` / `.env`.
+    * `search_youtube_video(query, video_category_id?)` — Async function that:
+        1. Hits `youtube/v3/search` with `safeSearch=strict` to find a video.
+        2. Hits `youtube/v3/videos?part=contentDetails` to fetch real duration (ISO 8601).
+        3. Returns full metadata dict: `{embed_url, title, duration, duration_seconds, thumbnail}`.
+    * `_parse_iso8601_duration(iso)` — Converts `PT3M8S` → `("3:08", 188)`.
+    * `_clean_youtube_title(raw)` — Strips channel suffixes (e.g. `| The Singing Walrus`), keeps first meaningful segment.
+
+* **Dedicated YouTube Enricher Node (`backend/app/agents/youtube_enricher.py`):**
+    * New LangGraph node that runs **once** after the Auditor loop, before the Personalizer.
+    * **Smarter query construction:** Searches by type + theme keywords instead of AI's fictional titles:
+        * Greeting: `"good morning hello circle time song toddlers kids {theme}"`
+        * Goodbye: `"goodbye song circle time toddlers kids {theme}"`
+        * Yoga: Maps AI creative names → standard poses via `_YOGA_POSE_MAP` (e.g. "seed"→"seed to tree", "butterfly"→"butterfly pose"), then `"{standard_pose} yoga for kids toddlers"`.
+    * **Metadata overwrite:** After finding real YouTube videos, **overwrites** the AI-generated `title` and `duration` with actual video metadata. Injects `youtube_url` embed URL.
+    * Uses `asyncio.gather()` for concurrent searches (all songs + yoga poses in parallel).
+    * Saves API quota: runs only once on the final accepted plan, not on every Architect iteration.
+
+* **Graph Rewiring (`backend/app/agents/graph.py`):**
+    * Removed inline YouTube enrichment from `architect.py`.
+    * New pipeline:
+        ```
+        fetch_context → architect → auditor → (revise loop)
+                                                    ↓
+                                           youtube_enricher → personalizer → save → END
+        ```
+
+* **Frontend Updates:**
+    * `apiTransformers.ts` — Already reads `youtube_url`, `title`, `duration` from backend; enricher overwrites these in-place so no transformer changes needed.
+    * `CircleTimeTab.tsx` — Relabeled "Lyrics" → "Educator Script" for both greeting and goodbye songs (AI script ≠ video lyrics).
+
+### Bug Fixes During Integration
+
+* **Gemini output truncated at ~64K chars → JSON ValidationError:**
+    * Increased `max_output_tokens` to 65,536 in both Architect and Personalizer Gemini calls.
+
+* **Frontend crash on null plan (`Cannot read property 'daily_plans' of null`):**
+    * Modified `planner.py` router to fall back to `draft_plan` when `personalized_plan` is null (e.g. auditor rejected after max iterations).
+    * Modified `personalizer.py` to not set `error` when skipping due to auditor rejection — allows draft plan fallback without triggering 500.
+
+* **`ValidationError: Invalid JSON: lone leading surrogate in hex escape`:**
+    * Added `_SURROGATE_RE` regex to both `architect.py` and `personalizer.py` to sanitize Gemini's invalid Unicode surrogate escapes before Pydantic validation.
+
+### Files Created / Modified
+
+| File | Action |
+|---|---|
+| `backend/app/agents/tools.py` | Rewritten — `search_youtube_video` returns full metadata dict |
+| `backend/app/agents/youtube_enricher.py` | **Created** — Dedicated LangGraph enricher node |
+| `backend/app/agents/graph.py` | Modified — Wired `youtube_enricher` node into pipeline |
+| `backend/app/agents/architect.py` | Modified — Removed inline YouTube enrichment, added surrogate sanitizer, increased max_output_tokens |
+| `backend/app/agents/personalizer.py` | Modified — Added surrogate sanitizer, increased max_output_tokens |
+| `backend/app/api/routers/planner.py` | Modified — draft_plan fallback when personalized is null |
+| `backend/config.py` | Modified — Added `YOUTUBE_API_KEY` |
+| `backend/requirements.txt` | Modified — Added `httpx>=0.27.0` |
+| `src/app/components/tabs/CircleTimeTab.tsx` | Modified — "Lyrics" → "Educator Script" |
+
+---
+
+## Phase 8: Strict YouTube Query Enforcement
+**Status:** Planned
+**Date:** March 11, 2026
+
+### Problem Statement
+
+YouTube Data API is returning **mainstream adult music** (e.g. Peter, Paul & Mary wedding songs, The Manhattans R&B) instead of toddler circle time content. The current query strings are too weak — `"good morning hello circle time song toddlers kids Starry Night Dreamers"` doesn't force YouTube's algorithm to target early childhood content.
+
+### Planned Fix
+
+Rewrite query construction in `tools.py` and `youtube_enricher.py` with strict scaffolding:
+
+* **Audience keywords:** `toddler OR preschool OR kindergarten OR 'kids song'`
+* **Negative keywords:** `-wedding -live -cover -'official video' -R&B -pop -remix -karaoke`
+* **Trusted channel bias:** `('Super Simple Songs' OR 'The Singing Walrus' OR 'Kiboomers' OR 'Cocomelon' OR 'Pinkfong')` for songs; `('Cosmic Kids' OR 'Yoga for Kids')` for yoga
+* Add `search_type` parameter to `search_youtube_video()` (`'greeting'`, `'goodbye'`, `'yoga'`)
+* Move query construction logic into `tools.py` (out of enricher)
+
+See plan: `.windsurf/plans/strict-youtube-queries-ea416b.md`
+
+---
+
+## Known Bug: Database Collision — Stale Plan Loaded on Re-generation
+**Status:** Open — Fix Required
+**Date:** March 11, 2026
+**Severity:** Critical
+
+### Symptom
+
+When a user generates multiple themes for the same week (e.g. Week 1 "Fox Forest", then Week 1 "Busy Bees"), the frontend always loads the **oldest** plan instead of the newly generated one. The top-left theme name shows an old theme even after generating a new plan.
+
+### Root Cause
+
+`save_plan_node` in `graph.py` always **inserts a new row** into `weekly_plans`:
+
+```python
+weekly_plan = WeeklyPlan(...)
+session.add(weekly_plan)  # Always INSERT, never UPDATE
+```
+
+The DB has an index on `(user_id, week_number)` but **no unique constraint**, so multiple rows accumulate for the same user + week. The frontend fetches by `user_id` and `week_number` and gets the oldest row (first inserted).
+
+### Required Fix: Upsert (One Plan Per Week Per User)
+
+1. **Add unique constraint** on `(user_id, week_number)` in the `weekly_plans` table (Alembic migration).
+2. **Change `save_plan_node`** from `session.add()` to an upsert pattern:
+    * Query for existing plan: `SELECT ... WHERE user_id = ? AND week_number = ?`
+    * If exists → **UPDATE** all columns (theme, circle_time, activities, etc.)
+    * If not → **INSERT** new row
+    * Alternative: Use PostgreSQL `INSERT ... ON CONFLICT (user_id, week_number) DO UPDATE SET ...`
+3. **Frontend** may need no changes if it already fetches the single row for a week.
+
+### Files to Modify
+
+| File | Change |
+|---|---|
+| `backend/app/db/models.py` | Change index to `UniqueConstraint("user_id", "week_number")` |
+| `backend/app/agents/graph.py` | Change `save_plan_node` to upsert logic |
+| `backend/alembic/versions/` | New migration for unique constraint |
