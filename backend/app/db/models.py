@@ -31,6 +31,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -176,6 +177,7 @@ class WeeklyPlan(Base):
     user: Mapped["User"] = relationship(back_populates="weekly_plans")
 
     __table_args__ = (
+        UniqueConstraint("user_id", "week_number", name="uq_weekly_plans_user_week"),
         Index("ix_weekly_plans_user_week", "user_id", "week_number"),
     )
 

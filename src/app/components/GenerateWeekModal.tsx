@@ -16,7 +16,7 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
   const [stage, setStage] = useState<
     "generating-themes" | "selection" | "generating-plan" | "error"
   >("generating-themes");
-  const { setTheme, registerDynamicThemes } = useTheme();
+  const { setThemeFromDetail, registerDynamicThemes } = useTheme();
   const { setCurrentPlan, setError: setPlannerError } = usePlanner();
   const [themeOptions, setThemeOptions] = useState<ThemeDetail[]>([]);
   const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null);
@@ -42,7 +42,7 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
 
       if (transformed.length > 0) {
         setSelectedThemeId(transformed[0].id);
-        setTheme(transformed[0].id);
+        setThemeFromDetail(transformed[0]);
       }
       setStage("selection");
     } catch (err: any) {
@@ -61,7 +61,8 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
 
   const handleSelectTheme = (themeId: string) => {
     setSelectedThemeId(themeId);
-    setTheme(themeId);
+    const detail = themeOptions.find((t) => t.id === themeId);
+    if (detail) setThemeFromDetail(detail);
   };
 
   const handleShuffle = async () => {
@@ -77,7 +78,7 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
 
       if (transformed.length > 0) {
         setSelectedThemeId(transformed[0].id);
-        setTheme(transformed[0].id);
+        setThemeFromDetail(transformed[0]);
       }
     } catch (err: any) {
       setErrorMsg(err.message ?? "Failed to generate themes");

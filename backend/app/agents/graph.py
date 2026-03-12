@@ -19,6 +19,7 @@ import logging
 import uuid
 
 from langgraph.graph import END, START, StateGraph
+from sqlalchemy import select
 
 from app.agents.architect import curriculum_architect
 from app.agents.auditor import safety_auditor
@@ -107,22 +108,47 @@ async def save_plan_node(state: PlannerState) -> dict:
 
     try:
         async with async_session_factory() as session:
-            # ── 1. Save weekly plan ───────────────────────────
-            weekly_plan = WeeklyPlan(
-                user_id=user_uid,
-                week_number=final_plan.get("week_number", 1),
-                week_range=final_plan.get("week_range", ""),
-                theme=final_plan.get("theme", ""),
-                theme_emoji=final_plan.get("theme_emoji"),
-                palette=final_plan.get("palette"),
-                domains=final_plan.get("domains"),
-                objectives=final_plan.get("objectives"),
-                circle_time=final_plan.get("circle_time"),
-                activities=activities_flat,
-                newsletter=final_plan.get("newsletter"),
-                is_generated=True,
-            )
-            session.add(weekly_plan)
+            # ── 1. Upsert weekly plan (one plan per user per week) ──
+            week_num = final_plan.get("week_number", 1)
+            existing = (
+                await session.execute(
+                    select(WeeklyPlan).where(
+                        WeeklyPlan.user_id == user_uid,
+                        WeeklyPlan.week_number == week_num,
+                    )
+                )
+            ).scalar_one_or_none()
+
+            if existing:
+                existing.week_range = final_plan.get("week_range", "")
+                existing.theme = final_plan.get("theme", "")
+                existing.theme_emoji = final_plan.get("theme_emoji")
+                existing.palette = final_plan.get("palette")
+                existing.domains = final_plan.get("domains")
+                existing.objectives = final_plan.get("objectives")
+                existing.circle_time = final_plan.get("circle_time")
+                existing.activities = activities_flat
+                existing.newsletter = final_plan.get("newsletter")
+                existing.is_generated = True
+                logger.info("Upsert: updated existing plan id=%s for week %s",
+                            existing.id, week_num)
+            else:
+                weekly_plan = WeeklyPlan(
+                    user_id=user_uid,
+                    week_number=week_num,
+                    week_range=final_plan.get("week_range", ""),
+                    theme=final_plan.get("theme", ""),
+                    theme_emoji=final_plan.get("theme_emoji"),
+                    palette=final_plan.get("palette"),
+                    domains=final_plan.get("domains"),
+                    objectives=final_plan.get("objectives"),
+                    circle_time=final_plan.get("circle_time"),
+                    activities=activities_flat,
+                    newsletter=final_plan.get("newsletter"),
+                    is_generated=True,
+                )
+                session.add(weekly_plan)
+                logger.info("Upsert: inserted new plan for week %s", week_num)
 
             # ── 2. Save critique history ──────────────────────
             if audit_result:
