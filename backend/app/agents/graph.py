@@ -11,7 +11,7 @@ Graph topology:
                                           ↓
                                     (personalize)
                                           ↓
-                                     personalizer → save → END
+                              personalizer → youtube_enricher → save → END
 """
 
 import json
@@ -250,10 +250,10 @@ def build_planner_graph():
     builder.add_conditional_edges(
         "auditor",
         route_auditor,
-        {"personalize": "youtube_enricher", "revise": "architect"},
+        {"personalize": "personalizer", "revise": "architect"},
     )
-    builder.add_edge("youtube_enricher", "personalizer")
-    builder.add_edge("personalizer", "save")
+    builder.add_edge("personalizer", "youtube_enricher")
+    builder.add_edge("youtube_enricher", "save")
     builder.add_edge("save", END)
 
     return builder.compile()

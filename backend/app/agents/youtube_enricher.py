@@ -40,25 +40,59 @@ _YOGA_POSE_MAP: dict[str, str] = {
 }
 
 
-def _build_song_query(song_title: str, song_type: str, theme: str) -> str:
-    """Build a YouTube search query for a circle-time song.
+def _extract_theme_keyword(theme: str) -> str:
+    """Pull one concrete noun from the theme name for search queries.
 
-    Instead of searching the AI's fictional title, searches by
-    song type + theme keywords to find real, popular kids songs.
+    E.g. 'Busy Bees & Bright Blooms' → 'bee',
+         'Fox Forest'                 → 'fox',
+         'Bug Express'                → 'bug',
+         'Starry Night Dreamers'      → 'star'.
+    """
+    # Strip punctuation, lowercase, split into words
+    words = re.sub(r"[^\w\s]", "", theme).lower().split()
+    # Skip generic filler words
+    _SKIP = {
+        "the", "a", "an", "and", "of", "for", "in", "on", "with",
+        "little", "big", "busy", "bright", "happy", "fun", "tiny",
+        "wonderful", "amazing", "great", "lovely", "sweet", "gentle",
+        "friendly", "friends", "week", "weekly", "express", "adventure",
+        "adventures", "dreamers", "movers", "groovers", "explorers",
+        "blooms",
+    }
+    for w in words:
+        if w not in _SKIP and len(w) >= 3:
+            # De-pluralise simple cases (bees→bee, bugs→bug, foxes→fox)
+            if w.endswith("xes"):
+                return w[:-2]
+            if w.endswith("ies"):
+                return w[:-3] + "y"
+            if w.endswith("es") and len(w) > 4:
+                return w[:-2]
+            if w.endswith("s") and not w.endswith("ss"):
+                return w[:-1]
+            return w
+    return ""
+
+
+def _build_song_query(song_title: str, song_type: str, theme: str) -> str:
+    """Build a concise YouTube search query for a circle-time song.
+
+    Includes one theme keyword so results feel relevant to the week.
 
     Args:
         song_title: The AI-generated song title (used as fallback hint).
         song_type: 'greeting' or 'goodbye'.
-        theme: The weekly theme name (e.g. 'Little Movers & Groovers').
+        theme: The weekly theme name (e.g. 'Busy Bees').
     """
-    theme_words = re.sub(r"[^\w\s]", "", theme).strip()
+    kw = _extract_theme_keyword(theme)
+    theme_part = f" {kw}" if kw else ""
 
     if song_type == "greeting":
-        return f"good morning hello circle time song toddlers kids {theme_words}"
+        return f"good morning{theme_part} song for toddlers"
     elif song_type == "goodbye":
-        return f"goodbye song circle time toddlers kids {theme_words}"
+        return f"goodbye{theme_part} song for toddlers"
     else:
-        return f"{song_title} song for toddlers kids"
+        return f"{song_title} song for toddlers"
 
 
 def _build_yoga_query(pose_name: str) -> str:
@@ -91,13 +125,15 @@ async def youtube_enricher(state: PlannerState) -> dict:
     Returns:
         A dict with the updated draft_plan.
     """
-    draft_plan = state.get("draft_plan")
-    if not draft_plan:
-        logger.warning("YouTubeEnricher: no draft_plan to enrich")
+    # Prefer personalized_plan (runs after personalizer now), fall back to draft
+    plan = state.get("personalized_plan") or state.get("draft_plan")
+    plan_key = "personalized_plan" if state.get("personalized_plan") else "draft_plan"
+    if not plan:
+        logger.warning("YouTubeEnricher: no plan to enrich")
         return {}
 
-    theme = draft_plan.get("theme", "")
-    circle_time = draft_plan.get("circle_time")
+    theme = plan.get("theme", "")
+    circle_time = plan.get("circle_time")
     if not circle_time:
         logger.warning("YouTubeEnricher: no circle_time in plan")
         return {}
@@ -174,4 +210,4 @@ async def youtube_enricher(state: PlannerState) -> dict:
 
     logger.info("YouTubeEnricher: enriched %d / %d items", enriched, len(search_coros))
 
-    return {"draft_plan": draft_plan}
+    return {plan_key: plan}

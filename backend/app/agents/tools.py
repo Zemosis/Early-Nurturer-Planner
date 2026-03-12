@@ -7,6 +7,7 @@ retrieve live data (students, plans, embeddings) and call Gemini for
 curriculum generation and personalisation.
 """
 
+import html as _html
 import logging
 import uuid
 from urllib.parse import quote_plus
@@ -301,22 +302,27 @@ def _parse_iso8601_duration(iso: str) -> tuple[str, int]:
 
 
 def _clean_youtube_title(raw_title: str) -> str:
-    """Strip channel / metadata suffixes from a YouTube title.
+    """Strip channel names, hashtags, HTML entities, and Unicode junk from a YouTube title.
 
-    e.g. 'Goodbye Song for Children - Children's Goodbye Song - ...'
-    becomes 'Goodbye Song for Children'.
-    Keeps the first meaningful segment before common separators.
+    e.g. 'Good Morning Song ≡♥| Lalafun Nursery Rhymes &amp; Kids Songs #kidssongs'
+    becomes 'Good Morning Song'.
     """
     import re as _re
-    # Split on common separators: |, -, /, and keep the first segment
-    # that is at least 8 chars. This avoids cutting "Cat-Cow" style names.
-    parts = _re.split(r'\s+[\|/]\s+|\s+-\s+', raw_title)
-    # Return the first non-trivial segment
+    # 1. Decode HTML entities  (&amp; → &)
+    t = _html.unescape(raw_title)
+    # 2. Remove hashtag blocks (#word)
+    t = _re.sub(r'#\S+', '', t)
+    # 3. Remove Unicode box-drawing, dingbats, musical symbols, misc symbols
+    #    (U+2300-27FF covers ≡, ♥, ☰, ♫, ✦, etc.)
+    t = _re.sub(r'[\u2300-\u27FF\u2600-\u26FF\u2700-\u27BF]', '', t)
+    # 4. Split on separators: |, /, — , - (with surrounding spaces)
+    parts = _re.split(r'\s*[\|/]\s*|\s+[–—-]\s+', t)
+    # 5. Return the first segment ≥ 5 chars
     for part in parts:
         cleaned = part.strip()
-        if len(cleaned) >= 8:
+        if len(cleaned) >= 5:
             return cleaned
-    return raw_title.strip()
+    return t.strip()
 
 
 async def search_youtube_video(
@@ -344,12 +350,20 @@ async def search_youtube_video(
         logger.warning("YouTube search skipped — YOUTUBE_API_KEY not set")
         return None
 
+    # Trusted kids / education channels — prefer these when available
+    _TRUSTED_CHANNELS = {
+        "super simple songs", "the kiboomers", "cosmic kids yoga",
+        "gonoodle", "pinkfong", "cocomelon", "jack hartmann",
+        "the singing walrus", "bounce patrol", "little baby bum",
+        "sesame street", "dave and ava", "badanamu",
+    }
+
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
-            # 1. Search for the video
+            # 1. Search for videos (fetch several to pick best)
             params = {
                 "part": "snippet",
-                "maxResults": 1,
+                "maxResults": 5,
                 "q": query,
                 "type": "video",
                 "safeSearch": "strict",
@@ -365,10 +379,21 @@ async def search_youtube_video(
                 logger.warning("YouTube: 0 results for '%s'", query)
                 return None
 
-            snippet = items[0]["snippet"]
-            video_id = items[0]["id"]["videoId"]
+            # 2. Score results — prefer trusted channels
+            best_item = items[0]
+            best_score = 0
+            for item in items:
+                channel = (item["snippet"].get("channelTitle") or "").lower()
+                score = 2 if any(tc in channel for tc in _TRUSTED_CHANNELS) else 1
+                if score > best_score:
+                    best_score = score
+                    best_item = item
 
-            # 2. Get real duration from videos endpoint
+            snippet = best_item["snippet"]
+            video_id = best_item["id"]["videoId"]
+            channel_title = snippet.get("channelTitle", "")
+
+            # 3. Get real duration from videos endpoint
             detail_resp = await client.get(
                 YOUTUBE_VIDEOS_URL,
                 params={
@@ -389,7 +414,8 @@ async def search_youtube_video(
         thumb = (snippet.get("thumbnails") or {}).get("high", {}).get("url", "")
         embed_url = f"https://www.youtube.com/embed/{video_id}"
 
-        logger.info("YouTube: '%s' → %s (%s) [%s]", query, title, duration, embed_url)
+        logger.info("YouTube: '%s' → %s (%s) [%s] ch=%s",
+                    query, title, duration, embed_url, channel_title)
         return {
             "embed_url": embed_url,
             "title": title,
