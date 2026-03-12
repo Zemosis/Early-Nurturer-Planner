@@ -1,9 +1,11 @@
 /**
  * API client for the Early Nurturer Planner backend.
  *
- * All requests go through the Vite dev proxy (/api → localhost:8000).
+ * In development: requests go through Vite dev proxy (/api → localhost:8000).
+ * In production:  VITE_API_BASE_URL points to the Cloud Run service.
  */
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 const DEFAULT_USER_ID = "83b58b5f-698b-4ae1-9529-f83d97641f01";
 
 // ── Themes ───────────────────────────────────────────────────
@@ -23,7 +25,7 @@ export async function generateThemes(
     theme_count: params.themeCount ?? 5,
   };
 
-  const res = await fetch("/api/themes/generate", {
+  const res = await fetch(`${API_BASE}/api/themes/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -56,7 +58,7 @@ export async function generatePlan(
     week_range: params.weekRange ?? "",
   };
 
-  const res = await fetch("/api/planner/generate", {
+  const res = await fetch(`${API_BASE}/api/planner/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

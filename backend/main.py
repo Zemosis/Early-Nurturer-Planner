@@ -23,10 +23,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# ── CORS (allow Next.js frontend) ────────────────────────────
+# ── CORS (allow frontend origins) ─────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "https://early-nurturer-api-872290613394.us-central1.run.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

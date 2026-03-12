@@ -44,9 +44,9 @@ class Settings(BaseSettings):
         default="early-nurturer-planner-assets",
         description="Cloud Storage bucket for PDFs and assets",
     )
-    GOOGLE_APPLICATION_CREDENTIALS: str = Field(
-        ...,
-        description="Path to the GCP service account JSON key file",
+    GOOGLE_APPLICATION_CREDENTIALS: str | None = Field(
+        default=None,
+        description="Path to the GCP service account JSON key file (optional on Cloud Run)",
     )
 
     # ── Vertex AI ────────────────────────────────────────────
@@ -63,7 +63,9 @@ class Settings(BaseSettings):
 
     @field_validator("GOOGLE_APPLICATION_CREDENTIALS")
     @classmethod
-    def credentials_file_must_exist(cls, v: str) -> str:
+    def credentials_file_must_exist(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         path = Path(v).expanduser().resolve()
         if not path.is_file():
             raise ValueError(
