@@ -31,6 +31,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:5174",
         "https://early-nurturer-api-872290613394.us-central1.run.app",
+        "https://early-nurturer-planner.web.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
