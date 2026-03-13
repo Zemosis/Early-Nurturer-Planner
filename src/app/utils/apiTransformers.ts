@@ -8,22 +8,6 @@ import { WeekPlan } from "./mockData";
 
 // ── Static data injected into plans (AI doesn't generate URLs) ──
 
-const DEFAULT_YOGA_VIDEO_MAP: Record<string, string> = {
-  "tree pose": "https://www.youtube.com/embed/X655B4ISakg",
-  "cat-cow": "https://www.youtube.com/embed/kp-YAMcbZfE",
-  "cat-cow stretch": "https://www.youtube.com/embed/kp-YAMcbZfE",
-  "cat pose": "https://www.youtube.com/embed/kp-YAMcbZfE",
-  "cow pose": "https://www.youtube.com/embed/kp-YAMcbZfE",
-  "butterfly pose": "https://www.youtube.com/embed/eStdDU13ix8",
-  "cobra pose": "https://www.youtube.com/embed/jcVCo00Z45k",
-  "child's pose": "https://www.youtube.com/embed/oF_6Z8Sd6RI",
-  "piggy pose": "https://www.youtube.com/embed/oF_6Z8Sd6RI",
-  "piggy pose (child's pose)": "https://www.youtube.com/embed/oF_6Z8Sd6RI",
-  "dog pose": "https://www.youtube.com/embed/X655B4ISakg",
-  "dog pose (downward-facing dog)": "https://www.youtube.com/embed/X655B4ISakg",
-  "downward-facing dog": "https://www.youtube.com/embed/X655B4ISakg",
-};
-
 const DEFAULT_MUSIC_MOVEMENT_VIDEOS: WeekPlan["circleTime"]["musicMovementVideos"] = [
   {
     id: "freeze-dance",
@@ -205,16 +189,13 @@ export function transformApiPlanToWeekPlan(api: any): WeekPlan {
     duration: ct.goodbye_song?.duration ?? "1:30",
   };
 
-  const yogaPoses = (ct.yoga_poses ?? []).map((yp: any, idx: number) => {
-    const nameLower = (yp.name ?? "").toLowerCase();
-    return {
-      id: `yoga-${idx}`,
-      name: yp.name,
-      videoUrl: yp.youtube_url ?? DEFAULT_YOGA_VIDEO_MAP[nameLower] ?? "",
-      benefits: yp.benefits,
-      duration: yp.duration ?? 15,
-    };
-  });
+  const yogaPoses = (ct.yoga_poses ?? []).map((yp: any, idx: number) => ({
+    id: `yoga-${idx}`,
+    name: yp.name,
+    imageUrl: yp.image_url ?? "",
+    howTo: yp.how_to ?? [],
+    creativeCues: yp.creative_cues ?? [],
+  }));
 
   return {
     id: api.id,

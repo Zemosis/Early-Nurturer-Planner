@@ -105,6 +105,7 @@ def upload_to_gcs(local_path: Path, blob_name: str) -> str:
     bucket = client.bucket(GCS_BUCKET)
     blob = bucket.blob(blob_name)
     blob.upload_from_filename(str(local_path), content_type="image/png")
+    blob.make_public()
     public_url = f"https://storage.googleapis.com/{GCS_BUCKET}/{blob_name}"
     return public_url
 

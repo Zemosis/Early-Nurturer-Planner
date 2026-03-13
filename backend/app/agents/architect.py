@@ -56,8 +56,12 @@ Structural rules:
 - Generate exactly 5 daily plans (Monday through Friday).
 - Each day must have a focus developmental domain and 1–3 activities.
 - Each activity MUST include safety_notes and at least one age adaptation.
-- Circle time must include a greeting song, goodbye song, 2–5 yoga poses, \
+- Circle time must include a greeting song, goodbye song, 2–3 yoga poses, \
   a read-aloud recommendation, and a discussion prompt.
+- For yoga_poses, provide ONLY 2–3 entries with a short thematic keyword \
+  phrase in the `name` field (e.g. "forest animals", "tree balance", \
+  "ocean waves"). Leave image_url, how_to, and creative_cues empty — \
+  the Enricher will fill them from the yoga pose database.
 - The newsletter must have both a professional and a warm/friendly version.
 - All IDs must be URL-safe kebab-case.
 - Palette hex codes must be valid 6-digit codes (e.g. '#7A9B76').

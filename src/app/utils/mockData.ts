@@ -19,9 +19,8 @@ export interface WeekPlan {
       id: string;
       name: string;
       imageUrl?: string;
-      videoUrl?: string;
-      benefits: string;
-      duration: number;
+      howTo?: string[];
+      creativeCues?: string[];
     }[];
     musicMovementVideos: {
       id: string;
@@ -160,42 +159,43 @@ export const generateWeekPlan = (weekNumber: number): WeekPlan => {
   // Get theme-appropriate songs
   const { greetingSong, goodbyeSong } = getSongsForTheme(themeDetail.name, season);
 
-  // Yoga poses for toddlers
+  // Yoga poses for toddlers (mock — real data comes from yoga_poses DB)
   const yogaPoses = [
     {
       id: "tree-pose",
-      name: "Tree Pose",
-      videoUrl: "https://www.youtube.com/embed/X655B4ISakg", // Cosmic Kids Yoga
-      benefits: "Improves balance, focus, and strengthens legs. Great for building concentration in toddlers.",
-      duration: 15,
+      name: "Mountain Pose",
+      imageUrl: "https://storage.googleapis.com/early-nurturer-planner-assets/yoga/mountain-pose.png",
+      howTo: [
+        "Stand with parallel feet, hip-distance apart.",
+        "Balance the weight evenly over the feet.",
+        "Rest the arms alongside the body.",
+        "Reach the top of the head up towards the sky.",
+      ],
+      creativeCues: ["Stand tall and steady like a mountain top!"],
     },
     {
       id: "cat-cow",
-      name: "Cat-Cow Stretch",
-      videoUrl: "https://www.youtube.com/embed/kp-YAMcbZfE",
-      benefits: "Stretches the spine, improves flexibility, and teaches body awareness through animal movements.",
-      duration: 15,
+      name: "Cat /Cow",
+      imageUrl: "https://storage.googleapis.com/early-nurturer-planner-assets/yoga/cat-cow.png",
+      howTo: [
+        "From hands and knees, make the shape of an angry cat by rounding the back.",
+        "Now make the shape of a cow by lifting the tail and chest up.",
+        "Move back and forth between cat and cow.",
+      ],
+      creativeCues: ["Try hissssss-ing like an angry cat and moo-ing like a happy cow!"],
     },
     {
-      id: "butterfly",
-      name: "Butterfly Pose",
-      videoUrl: "https://www.youtube.com/embed/eStdDU13ix8",
-      benefits: "Opens hips, encourages calm breathing, and uses imagination through butterfly imagery.",
-      duration: 20,
-    },
-    {
-      id: "cobra",
-      name: "Cobra Pose",
-      videoUrl: "https://www.youtube.com/embed/jcVCo00Z45k",
-      benefits: "Strengthens back muscles, opens chest, and builds confidence through playful snake sounds.",
-      duration: 15,
-    },
-    {
-      id: "child-pose",
+      id: "childs-pose",
       name: "Child's Pose",
-      videoUrl: "https://www.youtube.com/embed/oF_6Z8Sd6RI",
-      benefits: "Calming resting pose that promotes relaxation and helps with self-regulation.",
-      duration: 20,
+      imageUrl: "https://storage.googleapis.com/early-nurturer-planner-assets/yoga/childs-pose.png",
+      howTo: [
+        "Come onto the hands and knees and sit back to rest on the feet.",
+        "Rest the head on the mat, with arms relaxed at the side.",
+      ],
+      creativeCues: [
+        "Pretend you are strong and steady like a rock in this pose!",
+        "How long can you stay still like a rock?",
+      ],
     },
   ];
 
@@ -208,7 +208,7 @@ export const generateWeekPlan = (weekNumber: number): WeekPlan => {
       isShort: true,
       educator: "The Kiboomers",
       thumbnail: "https://i.ytimg.com/vi/2UcZWXvgMZE/hqdefault.jpg",
-      energyLevel: "High",
+      energyLevel: "High" as const,
       ageGroup: ["0-12m", "12-24m", "24-36m"],
       duration: "3:12",
       indoor: true,
@@ -239,7 +239,7 @@ export const generateWeekPlan = (weekNumber: number): WeekPlan => {
       isShort: true,
       educator: "Super Simple Songs",
       thumbnail: "https://i.ytimg.com/vi/h4eueDYPTIg/hqdefault.jpg",
-      energyLevel: "Medium",
+      energyLevel: "Medium" as const,
       ageGroup: ["0-12m", "12-24m", "24-36m"],
       duration: "2:01",
       indoor: true,
@@ -270,7 +270,7 @@ export const generateWeekPlan = (weekNumber: number): WeekPlan => {
       isShort: true,
       educator: "Super Simple Songs",
       thumbnail: "https://i.ytimg.com/vi/l4WNrvVjiTw/hqdefault.jpg",
-      energyLevel: "High",
+      energyLevel: "High" as const,
       ageGroup: ["0-12m", "12-24m", "24-36m"],
       duration: "2:34",
       indoor: true,
@@ -301,7 +301,7 @@ export const generateWeekPlan = (weekNumber: number): WeekPlan => {
       isShort: true,
       educator: "The Learning Station",
       thumbnail: "https://i.ytimg.com/vi/NwT5oX_mqS0/hqdefault.jpg",
-      energyLevel: "High",
+      energyLevel: "High" as const,
       ageGroup: ["0-12m", "12-24m", "24-36m"],
       duration: "3:18",
       indoor: true,

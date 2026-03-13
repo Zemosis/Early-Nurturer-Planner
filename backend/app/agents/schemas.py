@@ -391,20 +391,32 @@ class SongSchema(BaseModel):
 
 
 class YogaPoseSchema(BaseModel):
-    """A toddler-friendly yoga or movement pose for circle time."""
+    """A toddler-friendly yoga or movement pose for circle time.
+
+    The Architect only fills in `name` with thematic keywords.
+    The Enricher overwrites all fields from the yoga_poses DB table.
+    """
 
     name: str = Field(
         ...,
-        description="Pose name (e.g. 'Tree Pose', 'Butterfly Pose').",
+        description="Pose name or thematic keyword phrase "
+                    "(e.g. 'Tree Pose', 'forest animals'). "
+                    "The Enricher will replace this with the real pose name.",
     )
-    benefits: str = Field(
-        ...,
-        description="1–2 sentences on developmental benefits "
-                    "(e.g. 'Improves balance and focus. Great for concentration.').",
+    image_url: str = Field(
+        default="",
+        description="Public GCS URL to the pose photo. "
+                    "Leave empty — filled by the Enricher.",
     )
-    duration: int = Field(
-        ...,
-        description="Hold time in seconds (5–60). Keep short for younger children.",
+    how_to: list[str] = Field(
+        default_factory=list,
+        description="Step-by-step instructions. "
+                    "Leave empty — filled by the Enricher.",
+    )
+    creative_cues: list[str] = Field(
+        default_factory=list,
+        description="Kid-friendly creative cues. "
+                    "Leave empty — filled by the Enricher.",
     )
 
 

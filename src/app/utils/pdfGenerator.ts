@@ -103,12 +103,12 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
   y += 10;
   
   y = drawSubheader('Theme Focus', y);
-  y = drawBodyText(week.description, y);
+  y = drawBodyText(`This week we explore "${week.theme}" across multiple developmental domains.`, y);
   y += 8;
   
   y = drawSubheader('Developmental Domains', y);
-  week.developmentalDomains.slice(0, 3).forEach(domain => {
-    y = drawBulletPoint(`${domain.name}: ${domain.description}`, y);
+  week.objectives.slice(0, 3).forEach((obj: { domain: string; goal: string }) => {
+    y = drawBulletPoint(`${obj.domain}: ${obj.goal}`, y);
   });
   y += 8;
   
@@ -146,11 +146,9 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
     y += 4;
     
     pdf.setFont('helvetica', 'normal');
-    const adaptations = [
-      `0-12m: ${activity.ageAdaptations['0-12m']}`,
-      `12-24m: ${activity.ageAdaptations['12-24m']}`,
-      `24-36m: ${activity.ageAdaptations['24-36m']}`
-    ];
+    const adaptations = (activity.adaptations ?? []).map(
+      (a: { age: string; content: string }) => `${a.age}: ${a.content}`
+    );
     adaptations.forEach(adapt => {
       const lines = pdf.splitTextToSize(adapt, contentWidth - 10);
       pdf.text(lines, margin + 5, y);
@@ -178,7 +176,8 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
   
   y = drawSubheader('🧘 Yoga & Mindful Movement', y);
   week.circleTime.yogaPoses.slice(0, 3).forEach(pose => {
-    y = drawBulletPoint(`${pose.name}: ${pose.benefits}`, y);
+    const summary = pose.howTo?.length ? pose.howTo[0] : '';
+    y = drawBulletPoint(`${pose.name}${summary ? ': ' + summary : ''}`, y);
   });
   y += 8;
   
@@ -214,7 +213,7 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
   y += 10;
   
   y = drawSubheader('This Week in Class', y);
-  y = drawBodyText(`This week we're exploring the theme "${week.theme}". ${week.description}`, y);
+  y = drawBodyText(`This week we're exploring the theme "${week.theme}". Children will engage in hands-on, sensory-rich activities across multiple developmental domains.`, y);
   y += 8;
   
   y = drawSubheader('Activities to Try at Home', y);
