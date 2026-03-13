@@ -57,7 +57,10 @@ gcloud run deploy "$SERVICE_NAME" \
   --allow-unauthenticated \
   --add-cloudsql-instances "$CLOUD_SQL_INSTANCE" \
   --set-env-vars "$ENV_VARS" \
-  --memory 1Gi \
+  --memory 2Gi \
+  --cpu 2 \
+  --min-instances 1 \
+  --no-cpu-throttling \
   --timeout 300 \
   --port 8080
 

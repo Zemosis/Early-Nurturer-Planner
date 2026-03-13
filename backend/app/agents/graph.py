@@ -14,12 +14,13 @@ Graph topology:
                               personalizer → youtube_enricher → save → END
 """
 
+import asyncio
 import json
 import logging
 import uuid
 
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.agents.architect import curriculum_architect
 from app.agents.auditor import safety_auditor
@@ -49,23 +50,34 @@ async def fetch_context_node(state: PlannerState) -> dict:
     theme_name = selected_theme.get("name", "early childhood activities")
 
     logger.info("FetchContext: fetching for user=%s, theme=%s", user_id, theme_name)
-    try:
-        student_ctx = await fetch_student_context(user_id)
-        pedagogy_ctx = await query_pedagogy(
-            f"curriculum activities for '{theme_name}' theme with infants and toddlers"
-        )
-        return {
-            "student_context": student_ctx,
-            "pedagogy_context": pedagogy_ctx,
-            "error": None,
-        }
-    except Exception as e:
-        logger.error("FetchContext: failed — %s", e, exc_info=True)
-        return {
-            "student_context": "No student data available.",
-            "pedagogy_context": "No pedagogy data available.",
-            "error": f"Context fetch failed: {e}",
-        }
+
+    student_coro = fetch_student_context(user_id)
+    pedagogy_coro = query_pedagogy(
+        f"curriculum activities for '{theme_name}' theme with infants and toddlers"
+    )
+
+    results = await asyncio.gather(
+        student_coro, pedagogy_coro, return_exceptions=True
+    )
+
+    # Handle partial failures gracefully
+    if isinstance(results[0], Exception):
+        logger.error("FetchContext: student fetch failed — %s", results[0])
+        student_ctx = "No student data available."
+    else:
+        student_ctx = results[0]
+
+    if isinstance(results[1], Exception):
+        logger.error("FetchContext: pedagogy fetch failed — %s", results[1])
+        pedagogy_ctx = "No pedagogy data available."
+    else:
+        pedagogy_ctx = results[1]
+
+    return {
+        "student_context": student_ctx,
+        "pedagogy_context": pedagogy_ctx,
+        "error": None,
+    }
 
 
 # ══════════════════════════════════════════════════════════════
@@ -110,45 +122,37 @@ async def save_plan_node(state: PlannerState) -> dict:
         async with async_session_factory() as session:
             # ── 1. Upsert weekly plan (one plan per user per week) ──
             week_num = final_plan.get("week_number", 1)
-            existing = (
-                await session.execute(
-                    select(WeeklyPlan).where(
-                        WeeklyPlan.user_id == user_uid,
-                        WeeklyPlan.week_number == week_num,
-                    )
-                )
-            ).scalar_one_or_none()
-
-            if existing:
-                existing.week_range = final_plan.get("week_range", "")
-                existing.theme = final_plan.get("theme", "")
-                existing.theme_emoji = final_plan.get("theme_emoji")
-                existing.palette = final_plan.get("palette")
-                existing.domains = final_plan.get("domains")
-                existing.objectives = final_plan.get("objectives")
-                existing.circle_time = final_plan.get("circle_time")
-                existing.activities = activities_flat
-                existing.newsletter = final_plan.get("newsletter")
-                existing.is_generated = True
-                logger.info("Upsert: updated existing plan id=%s for week %s",
-                            existing.id, week_num)
-            else:
-                weekly_plan = WeeklyPlan(
-                    user_id=user_uid,
-                    week_number=week_num,
-                    week_range=final_plan.get("week_range", ""),
-                    theme=final_plan.get("theme", ""),
-                    theme_emoji=final_plan.get("theme_emoji"),
-                    palette=final_plan.get("palette"),
-                    domains=final_plan.get("domains"),
-                    objectives=final_plan.get("objectives"),
-                    circle_time=final_plan.get("circle_time"),
-                    activities=activities_flat,
-                    newsletter=final_plan.get("newsletter"),
-                    is_generated=True,
-                )
-                session.add(weekly_plan)
-                logger.info("Upsert: inserted new plan for week %s", week_num)
+            stmt = pg_insert(WeeklyPlan).values(
+                user_id=user_uid,
+                week_number=week_num,
+                week_range=final_plan.get("week_range", ""),
+                theme=final_plan.get("theme", ""),
+                theme_emoji=final_plan.get("theme_emoji"),
+                palette=final_plan.get("palette"),
+                domains=final_plan.get("domains"),
+                objectives=final_plan.get("objectives"),
+                circle_time=final_plan.get("circle_time"),
+                activities=activities_flat,
+                newsletter=final_plan.get("newsletter"),
+                is_generated=True,
+            )
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_weekly_plans_user_week",
+                set_={
+                    "week_range": stmt.excluded.week_range,
+                    "theme": stmt.excluded.theme,
+                    "theme_emoji": stmt.excluded.theme_emoji,
+                    "palette": stmt.excluded.palette,
+                    "domains": stmt.excluded.domains,
+                    "objectives": stmt.excluded.objectives,
+                    "circle_time": stmt.excluded.circle_time,
+                    "activities": stmt.excluded.activities,
+                    "newsletter": stmt.excluded.newsletter,
+                    "is_generated": stmt.excluded.is_generated,
+                },
+            )
+            await session.execute(stmt)
+            logger.info("Upsert: saved plan for week %s", week_num)
 
             # ── 2. Save critique history ──────────────────────
             if audit_result:
