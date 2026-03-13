@@ -50,10 +50,10 @@ FastAPI / LangGraph nodes
 │   (audit trail)      │    │  (state snapshots)│    │ (architect↔auditor)  │
 └─────────────────────┘    └──────────────────┘    └──────────────────────┘
 
-┌──────────────────────────┐
-│ vector_store_curriculum   │
-│   (RAG chunks, 768d)     │
-└──────────────────────────┘
+┌──────────────────────────┐    ┌──────────────────────┐
+│ vector_store_curriculum   │    │     yoga_poses        │
+│   (RAG chunks, 768d)     │    │  (pose catalog, 768d) │
+└──────────────────────────┘    └──────────────────────┘
 ```
 
 ---
@@ -246,6 +246,26 @@ Chunked pedagogy PDFs for RAG pipeline (not yet populated with real data).
 
 ---
 
+### `yoga_poses`
+
+Yoga pose catalog extracted from the "Yoga for the Classroom" PDF. Each pose has an image in GCS and a 768-dim embedding for semantic search.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | PK, default uuid4 | Pose ID |
+| `name` | VARCHAR(255) | UNIQUE, NOT NULL | Pose name (e.g. "Cat /Cow") |
+| `image_url` | VARCHAR(512) | NOT NULL | Public GCS URL to pose photo |
+| `how_to` | JSONB | nullable | Step-by-step instructions as string array |
+| `creative_cues` | JSONB | nullable | Kid-friendly prompts as string array |
+| `embedding` | Vector(768) | nullable | Gemini text-embedding-004 vector |
+| `created_at` | TIMESTAMPTZ | server_default now() | |
+
+**Seeded by:** `scripts/seed_yoga_catalog.py` (~30 poses)
+**Queried by:** `youtube_enricher.py → _find_yoga_poses()` via cosine distance
+**Migration:** `2026_03_13_e375332db6a6_add_yoga_poses_table.py`
+
+---
+
 ## Migrations (Alembic)
 
 - Config: `alembic.ini` (no credentials — loaded from `.env`)
@@ -264,7 +284,9 @@ alembic revision --autogenerate -m "description"
 
 ---
 
-## Seed Data (`scripts/seed_db.py`)
+## Seed Data
+
+### `scripts/seed_db.py` — Mock Users & Students
 
 Inserts mock data for development:
 - **1 User:** Sarah Thompson (Little Sprouts Learning Center)
@@ -272,6 +294,18 @@ Inserts mock data for development:
 - **8 Embeddings:** 2 per student (Sensory + Gross Motor domains, random 768-dim vectors)
 
 Idempotent — checks for existing data before inserting.
+
+### `scripts/seed_yoga_catalog.py` — Yoga Pose Catalog (Phase 2)
+
+Seeds ~30 yoga poses from the "Yoga for the Classroom" PDF:
+1. Parses raw page text with Gemini → `{name, how_to, creative_cues}`
+2. Matches image file in `data_prep/images/`
+3. Uploads image to GCS (`yoga/` folder) with `make_public()`
+4. Generates 768-dim embedding via `text-embedding-004`
+5. Upserts row into `yoga_poses` table
+
+**Prerequisite:** Run `extract_pdf_raw.py` first to generate `data_prep/raw_text.json` and `data_prep/images/`.
+Idempotent — skips poses that already exist by name.
 
 ---
 

@@ -506,7 +506,7 @@ See Phase 8, section 4 above. Upsert logic + unique constraint + Alembic migrati
 ---
 
 ## Phase 9: Pipeline Speed Optimization
-**Status:** Complete
+**Status:** In Progress 
 **Date:** March 12, 2026
 
 ### Problem Statement
@@ -552,3 +552,104 @@ Attempted to switch all three agents to `gemini-3-flash-preview` with per-agent 
 | `backend/app/agents/auditor.py` | Thresholds lowered (safety<5, dev_fit<4), softer accept-with-suggestions prompt |
 | `backend/app/agents/architect.py` | Safety checklist added to system prompt |
 | `backend/app/agents/personalizer.py` | No config changes (model stays `gemini-2.5-flash`) |
+
+---
+
+## Phase 10: Yoga Vector DB Integration
+**Status:** Complete
+**Date:** March 13, 2026
+
+### Problem Statement
+
+Yoga poses in Circle Time were previously hardcoded or AI-generated with fictional names, benefits, and YouTube video links. There was no real yoga content library — the AI invented poses, and the frontend displayed YouTube iframes with timers. This didn't match the project's goal of using the **"Yoga for the Classroom" PDF** as the source of truth for yoga content.
+
+### Key Accomplishments
+
+#### 1. Database: `yoga_poses` Table (`backend/app/db/models.py`)
+
+- Added `YogaPose` SQLAlchemy model with `name` (unique), `image_url`, `how_to` (JSONB list), `creative_cues` (JSONB list), `embedding` (Vector(768)), `created_at`.
+- Generated and applied Alembic migration.
+
+#### 2. Yoga Catalog Seeder (`backend/scripts/seed_yoga_catalog.py`)
+
+Pipeline per PDF page:
+1. Parse raw text with Gemini → `{name, how_to, creative_cues}`
+2. Match image file in `data_prep/images/` by kebab-case slug
+3. Upload image to GCS (`yoga/` folder) with `make_public()`
+4. Generate 768-dim embedding via `text-embedding-004`
+5. Upsert row into `yoga_poses` table
+
+Prerequisite: `extract_pdf_raw.py` generates `raw_text.json` + extracted images.
+Result: ~30 poses seeded with images, instructions, creative cues, and embeddings.
+
+#### 3. Schema Update (`backend/app/agents/schemas.py`)
+
+`YogaPoseSchema` fields changed:
+- **Removed:** `benefits` (str), `duration` (int)
+- **Added:** `image_url` (str, default ""), `how_to` (list[str], default []), `creative_cues` (list[str], default [])
+
+#### 4. Architect Prompt Update (`backend/app/agents/architect.py`)
+
+New instruction: "For yoga_poses, provide ONLY 2–3 entries with a short thematic keyword phrase in the `name` field (e.g. 'forest animals', 'tree balance'). Leave image_url, how_to, and creative_cues empty — the Enricher will fill them."
+
+#### 5. Enricher Overhaul (`backend/app/agents/youtube_enricher.py`)
+
+- **YouTube search for songs:** Unchanged (greeting + goodbye).
+- **YouTube search for yoga:** **Removed entirely.**
+- **Vector DB search for yoga:** New `_find_yoga_poses(theme, keywords, limit=3)`:
+  1. Collects Architect keyword phrases from `yoga_poses[].name`
+  2. Builds query: `"kids yoga poses for theme: {theme} {keywords}"`
+  3. Embeds via Gemini `text-embedding-004` (768-dim)
+  4. Queries `yoga_poses` table: `ORDER BY cosine_distance(embedding, query_vector) LIMIT 3`
+  5. Overwrites `circle_time["yoga_poses"]` with DB results
+- Song searches + yoga vector search run in parallel via `asyncio.gather()`.
+
+#### 6. Frontend: API Transformer (`src/app/utils/apiTransformers.ts`)
+
+- Removed `DEFAULT_YOGA_VIDEO_MAP` (dead code).
+- Yoga pose mapping now uses: `image_url` → `imageUrl`, `how_to` → `howTo`, `creative_cues` → `creativeCues`.
+
+#### 7. Frontend: YogaSection Component (`src/app/components/circle-time/YogaSection.tsx`)
+
+Complete rewrite (360 lines → 189 lines):
+- **Removed:** YouTube iframe, timer, auto/manual mode, calm mode, duration buttons, benefits display.
+- **Added:** GCS pose image (`object-contain`, `max-h-[500px]`), foldable "How To" accordion (numbered steps, purple theme), foldable "Creative Cues" accordion (sparkle bullets, pink theme).
+- **Kept:** Pose carousel navigation (previous/next/random).
+
+#### 8. Frontend: Mock Data & PDF Generator
+
+- `mockData.ts` — Updated `yogaPoses` type: `imageUrl`, `howTo`, `creativeCues`. Added `as const` to `energyLevel` literals to fix union type error.
+- `pdfGenerator.ts` — Fixed 4 pre-existing type errors:
+  - `week.description` → inline theme text
+  - `week.developmentalDomains` → `week.objectives`
+  - `activity.ageAdaptations[...]` → `activity.adaptations.map(...)`
+
+### Bug Fixes
+
+1. **Yoga images returning 403 Forbidden:** GCS objects were uploaded without public ACL. Added `blob.make_public()` to `seed_yoga_catalog.py`. Existing objects fixed via `gcloud storage objects update`.
+
+2. **Yoga images cropped in UI:** `object-cover` + `maxHeight: 400px` cropped tall portrait photos to a narrow horizontal strip. Changed to `object-contain` + `max-h-[500px]`.
+
+### Files Created / Modified
+
+| File | Action |
+|---|---|
+| `backend/app/db/models.py` | Added `YogaPose` model |
+| `backend/scripts/seed_yoga_catalog.py` | Created — PDF→DB yoga seeder with GCS upload + embeddings |
+| `backend/app/agents/schemas.py` | Modified — `YogaPoseSchema` fields replaced |
+| `backend/app/agents/architect.py` | Modified — Yoga keyword-only prompt |
+| `backend/app/agents/youtube_enricher.py` | Major rewrite — Vector DB yoga search replaces YouTube |
+| `src/app/utils/apiTransformers.ts` | Modified — New yoga field mapping, removed dead code |
+| `src/app/components/circle-time/YogaSection.tsx` | Major rewrite — Image + accordion UI |
+| `src/app/utils/mockData.ts` | Modified — New yoga type + `as const` fix |
+| `src/app/utils/pdfGenerator.ts` | Modified — Fixed 4 pre-existing type errors |
+| `CIRCLE_TIME_YOGA_MUSIC_MOVEMENT.md` | Updated to v2.0 |
+| `YOGA_TIME_DAILY_SCHEDULE_INTEGRATION.md` | Updated to v1.1 |
+| `backend/AGENTIC_PIPELINE_SYSTEM.md` | Updated enricher + schema docs |
+| `backend/DATABASE_SCHEMA_SYSTEM.md` | Added `yoga_poses` table + seeder docs |
+
+### Architecture Notes
+
+- **Vector search replaces YouTube for yoga:** The enricher now has two distinct data sources — YouTube API for songs, PostgreSQL + pgvector for yoga poses. This ensures yoga content is always from the vetted PDF catalog.
+- **Embedding strategy:** Combined `theme + architect keywords` produces a single query vector. This finds poses semantically related to the weekly theme (e.g. "ocean" → Boat Pose, Fish Pose).
+- **GCS public images:** Pose photos are served directly from `https://storage.googleapis.com/{bucket}/yoga/{slug}.png`. No CDN or signed URLs needed for public educational content.

@@ -11,54 +11,48 @@ Added two new interactive sections to the Circle Time module: **Yoga & Mindful M
 ### Purpose
 Introduce guided movement and mindfulness during Circle Time using yoga poses with visual references and timed interactions.
 
-### Features Implemented
+### Features Implemented (v2.0 — Phase 3 Vector DB Integration)
 
 #### 1. Pose Display
-- **Pose Name**: Large, centered display (e.g., "Tree Pose")
-- **Visual Options**:
-  - Embedded YouTube video
-  - Image (fallback)
-  - Emoji placeholder (if no media)
+- **Pose Name**: Large, centered display (e.g., "Cat /Cow", "Frog Pose")
+- **Pose Image**: Full-width GCS-hosted photo from the yoga PDF catalog
+  - `object-contain` sizing — entire illustration always visible
+  - Emoji placeholder fallback if no image URL
 - **Current Pose Indicator**: "Pose X of Y"
 
-#### 2. Timer Functionality
-- **Default Duration**: 15 seconds
-- **Adjustable Range**: 10, 15, 20, 30 seconds
-- **Large Countdown Display**: Minutes:Seconds format
-- **Visual Feedback**:
-  - Normal state: Purple/pink gradient
-  - Last 5 seconds: Orange/red gradient with animation
-- **Audio Cue**: Gentle beep when timer ends (optional)
+#### 2. How To — Foldable Section
+- **Collapsible accordion** with numbered step-by-step instructions
+- Purple theme with numbered circle badges (1, 2, 3…)
+- Data sourced from `yoga_poses` DB table (extracted from PDF via Gemini)
 
-#### 3. Pose Flow Control
-**Auto Mode**:
-- Automatically transitions to next pose when timer ends
-- Indicated by "🔄 Auto mode" badge
+#### 3. Creative Cues — Foldable Section
+- **Collapsible accordion** with kid-friendly creative prompts
+- Pink theme with sparkle (✨) bullet points
+- E.g., "Try hissssss-ing like an angry cat and moo-ing like a happy cow!"
 
-**Manual Mode** (Default):
-- Teacher controls pose transitions
-- "Next Pose" button
-- "Previous Pose" button
-- "Reset Timer" button
-
-#### 4. Additional Controls
-- **Play/Pause**: Large central button (56×56px)
+#### 4. Pose Navigation
+- **Previous/Next**: Skip through poses sequentially
 - **Random Pose**: Shuffle button for variety
-- **Calm Mode**: Toggle soft background gradient (blue/purple)
+- Foldable sections auto-collapse on pose change
 
-#### 5. Benefits Display
-- Shows pose-specific benefits in highlighted box
-- Example: "Improves balance, focus, and strengthens legs"
+#### 5. Vector DB Integration (Backend)
+- Architect generates 2–3 thematic keyword phrases (e.g., "forest animals")
+- Enricher embeds theme + keywords via `text-embedding-004`
+- Cosine similarity search against `yoga_poses` table returns top 3 poses
+- Overwrites `circle_time.yoga_poses` with real pose data (name, image_url, how_to, creative_cues)
 
-### Yoga Poses Included (5 Total)
+### Yoga Poses Catalog (~30 Total in DB)
 
-| Pose | Duration | Benefits |
-|------|----------|----------|
-| **Tree Pose** | 15s | Balance, focus, leg strength |
-| **Cat-Cow Stretch** | 15s | Spine flexibility, body awareness |
-| **Butterfly Pose** | 20s | Hip opening, calm breathing |
-| **Cobra Pose** | 15s | Back strength, chest opening |
-| **Child's Pose** | 20s | Relaxation, self-regulation |
+Poses are sourced from the **"Yoga for the Classroom" PDF** and stored in the `yoga_poses` PostgreSQL table with pgvector embeddings. The enricher picks 3 per plan via semantic search.
+
+Examples:
+
+| Pose | How To (summary) | Creative Cues |
+|------|-------------------|---------------|
+| **Cat /Cow** | Alternate between angry cat (round back) and cow (lift tail/chest) | "Hissssss like a cat, moo like a cow!" |
+| **Frog Pose** | Wide stance, toes out, sit into frog squat | "Hop around like a frog!" |
+| **Mountain Pose** | Parallel feet, even weight, reach head to sky | "Stand tall like a mountain top!" |
+| **Child's Pose** | Hands and knees, sit back on feet, rest head | "Be strong and steady like a rock!" |
 
 ### Design
 - **Header**: Purple/pink gradient with yoga emoji (🧘)
@@ -183,12 +177,12 @@ Encourage active participation through guided music and movement activities with
 
 ### Files Created
 
-**1. `/src/app/components/circle-time/YogaSection.tsx`** (360 lines)
-- React component with timer and pose management
-- Auto/manual mode switching
-- Calm mode toggle
-- Random pose generator
-- Audio feedback on timer end
+**1. `/src/app/components/circle-time/YogaSection.tsx`** (189 lines)
+- React component with pose image display and navigation
+- Foldable "How To" accordion (numbered steps)
+- Foldable "Creative Cues" accordion (sparkle bullets)
+- Previous/Next/Random pose controls
+- GCS image with `object-contain` sizing
 
 **2. `/src/app/components/circle-time/MusicMovementSection.tsx`** (280 lines)
 - React component with song and prompt management
@@ -199,10 +193,10 @@ Encourage active participation through guided music and movement activities with
 ### Files Modified
 
 **1. `/src/app/utils/mockData.ts`**
-- Added `yogaPoses` array to `circleTime` interface (5 poses)
-- Added `musicMovementSongs` array to `circleTime` interface (4 songs)
+- Updated `yogaPoses` interface: `imageUrl`, `howTo`, `creativeCues` (removed `videoUrl`, `benefits`, `duration`)
+- Mock data uses 3 sample poses with GCS image URLs
+- Added `musicMovementVideos` array to `circleTime` interface (4 videos)
 - Updated `WeekPlan` interface with new types
-- Added curated YouTube video URLs
 
 **2. `/src/app/components/tabs/CircleTimeTab.tsx`**
 - Imported YogaSection and MusicMovementSection components
@@ -214,11 +208,8 @@ Encourage active participation through guided music and movement activities with
 **YogaSection State**:
 ```typescript
 - currentPoseIndex: number
-- isAutoMode: boolean
-- isPaused: boolean
-- timeRemaining: number
-- customDuration: number
-- isCalmMode: boolean
+- showHowTo: boolean
+- showCues: boolean
 ```
 
 **MusicMovementSection State**:
@@ -231,10 +222,10 @@ Encourage active participation through guided music and movement activities with
 ```
 
 ### Timers
-- **Yoga**: `setInterval` for countdown (1000ms)
 - **Music**: `setInterval` for movement rotation (15000ms)
 - **Countdown**: `setInterval` for 3-2-1 countdown (1000ms)
 - All timers properly cleaned up in `useEffect` return
+- **Yoga**: No timers — static image + instructions display
 
 ---
 
@@ -365,12 +356,11 @@ Encourage active participation through guided music and movement activities with
 ### Yoga Pose Interface
 ```typescript
 interface YogaPose {
-  id: string;           // Unique identifier
-  name: string;         // Display name ("Tree Pose")
-  imageUrl?: string;    // Optional static image
-  videoUrl?: string;    // Optional YouTube embed URL
-  benefits: string;     // Description of benefits
-  duration: number;     // Default duration in seconds
+  id: string;             // Unique identifier ("yoga-0")
+  name: string;           // Display name ("Cat /Cow")
+  imageUrl?: string;      // GCS public URL to pose photo
+  howTo?: string[];       // Step-by-step instructions
+  creativeCues?: string[];// Kid-friendly creative prompts
 }
 ```
 
@@ -655,6 +645,6 @@ The Yoga and Music & Movement sections transform Circle Time into an **interacti
 
 ---
 
-**Version**: 1.0  
-**Last Updated**: March 2026  
-**Status**: ✅ Complete
+**Version**: 2.0  
+**Last Updated**: March 13, 2026  
+**Status**: ✅ Complete (Phase 3 — Vector DB yoga integration)

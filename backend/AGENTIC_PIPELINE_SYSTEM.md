@@ -112,7 +112,7 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 **Structural rules enforced via system prompt:**
 - Exactly 5 daily plans (Monday–Friday)
 - 1–3 activities per day with safety_notes and age adaptations
-- Circle time with greeting/goodbye songs, 2–5 yoga poses, read-aloud
+- Circle time with greeting/goodbye songs, 2–3 yoga keyword phrases (enricher fills from DB), read-aloud
 - Newsletter with professional and warm versions
 - Kebab-case IDs, valid hex palette codes
 
@@ -187,41 +187,36 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 
 ---
 
-### 5. YouTube Enricher (`youtube_enricher.py`)
+### 5. Media Enricher (`youtube_enricher.py`)
 
-**Purpose:** Replace AI-generated fictional song/pose titles with real YouTube video metadata.
+**Purpose:** Enrich the plan with real YouTube song metadata AND DB-backed yoga poses.
 
-**Runs:** Once, **after personalization** (not before). This is critical because `SongSchema` and `YogaPoseSchema` have no `youtube_url` field — if the enricher ran before the Personalizer, Gemini's structured output would drop all YouTube data.
+**Runs:** Once, **after personalization**. Reads `personalized_plan` first, falls back to `draft_plan`.
 
-**Reads:** `personalized_plan` first, falls back to `draft_plan`.
+#### Songs (YouTube Search — unchanged)
 
 **Query construction:**
-- `_extract_theme_keyword(theme)` — pulls one concrete noun from the theme name ("Busy Bees" → `bee`, "Fox Forest" → `fox`, "Bug Express" → `bug`). Skips filler words, de-pluralises.
+- `_extract_theme_keyword(theme)` — pulls one concrete noun from the theme name ("Busy Bees" → `bee`, "Fox Forest" → `fox`). Skips filler words, de-pluralises.
 - **Greeting songs:** `"good morning {keyword} song for toddlers"`
 - **Goodbye songs:** `"goodbye {keyword} song for toddlers"`
-- **Yoga poses:** Maps AI creative names → standard poses via `_YOGA_POSE_MAP` (e.g. "seed" → "seed to tree"), then `"{standard_pose} yoga for kids toddlers"`
-
-**Yoga Pose Map (14 entries):**
-| AI Keyword | Standard Search Term |
-|---|---|
-| tree | tree pose |
-| cat / cow | cat cow pose |
-| butterfly | butterfly pose |
-| cobra | cobra pose |
-| downward / dog | downward dog |
-| child | child's pose |
-| mountain | mountain pose |
-| warrior | warrior pose |
-| star | star pose |
-| flower | flower pose |
-| frog | frog pose |
-| seed / sprout | seed to tree |
 
 **Metadata overwrite:**
-- Songs: overwrites `title`, `duration`, injects `youtube_url`
-- Yoga: overwrites `name`, `duration` (uses `duration_seconds`), injects `youtube_url`
+- Overwrites `title`, `duration`, injects `youtube_url`
 
-**Concurrency:** All searches fire in parallel via `asyncio.gather()`.
+#### Yoga Poses (Vector DB Search — Phase 3)
+
+**Pipeline:**
+1. Collect Architect-generated keyword phrases from `yoga_poses[].name` (e.g. "forest animals", "tree balance")
+2. Build query: `"kids yoga poses for theme: {theme} {keyword1} {keyword2} ..."`
+3. Embed via Gemini `text-embedding-004` (768-dim)
+4. Query `yoga_poses` table: `ORDER BY cosine_distance(embedding, query_vector) LIMIT 3`
+5. Overwrite `circle_time["yoga_poses"]` with DB results: `{name, image_url, how_to, creative_cues}`
+
+**Key function:** `_find_yoga_poses(theme, keywords, limit=3)` — async, uses `async_session_factory()`
+
+**No YouTube search for yoga** — completely replaced by vector similarity search against the ~30 poses seeded from the "Yoga for the Classroom" PDF.
+
+**Concurrency:** Song searches + yoga vector search fire in parallel via `asyncio.gather()`.
 
 ---
 
@@ -290,7 +285,7 @@ All three Gemini-calling agents use `response_schema` with Pydantic models. This
 - `AgeAdaptationSchema` — Age group, description, modifications list
 - `ActivitySchema` — Full activity: id, day, title, domain, duration, description, theme_connection, materials, safety_notes, adaptations, reflection_prompts
 - `SongSchema` — Title, script (educator lyrics), duration
-- `YogaPoseSchema` — Name, benefits, hold duration
+- `YogaPoseSchema` — Name, image_url (GCS), how_to (steps), creative_cues (prompts) — Enricher fills from DB
 - `CircleTimeSchema` — Letter, color, shape, counting_to, songs, yoga, read-aloud, discussion
 - `DailyPlanSchema` — Day, focus domain, 1–4 activities
 - `NewsletterSchema` — Welcome message, learning goals, home connection, professional + warm versions
