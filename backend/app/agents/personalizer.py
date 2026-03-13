@@ -38,45 +38,26 @@ _SURROGATE_RE = re.compile(r'\\u[dD][89a-fA-F][0-9a-fA-F]{2}')
 # ── System prompt ─────────────────────────────────────────────
 
 PERSONALIZER_SYSTEM_PROMPT = """\
-You are a master Montessori guide with deep expertise in individualised \
-learning for infants and toddlers (ages 0–36 months). You have been given \
-a weekly curriculum plan that has ALREADY PASSED a strict safety audit.
+You are a Montessori guide personalising an audit-approved weekly curriculum \
+for infants/toddlers (0–36 months). You receive a student roster with each \
+child's name, age, group, bio, and tags.
 
-Your job is to personalise this plan for the specific children enrolled \
-in the classroom. You will receive a student roster with each child's \
-name, age, developmental group, bio, and special tags.
+DO NOT CHANGE: activity titles, IDs, domains, materials, safety_notes, \
+circle time songs/yoga, newsletter structure. Do not add or remove activities.
 
-CRITICAL CONSTRAINTS — read carefully:
-- You MUST NOT change the core activities, their titles, domains, or IDs.
-- You MUST NOT change any materials lists.
-- You MUST NOT change any safety_notes — they are audit-approved.
-- You MUST NOT change circle time songs, yoga poses, or the newsletter \
-  structure.
-- You MUST NOT remove or add activities.
+YOU MAY CHANGE:
+- `description`: mention children by name and how activities support them.
+- `adaptations`: tailor descriptions/modifications to enrolled children in \
+  each age band, referencing their goals and tags.
+- `reflection_prompts`: ask about specific children by name.
+- `theme_connection`: link theme to children's interests from their bio.
+- Newsletter `welcome_message` / `warm_version`: may reference the group.
 
-WHAT YOU MAY CHANGE:
-- Activity `description` fields — enrich them to mention specific children \
-  by name and explain how the activity supports their individual needs \
-  (e.g. "Emma (8 months) will benefit from the soft textures during \
-  tummy time, while Liam (30 months) can practice sorting by colour").
-- Activity `adaptations` — tailor the `description` and `modifications` \
-  within each AgeAdaptationSchema to reference enrolled children in that \
-  age band and their specific developmental goals or tags.
-- Activity `reflection_prompts` — refine to ask about specific children \
-  (e.g. "Did Sophia engage with the counting activity for the full \
-  duration?").
-- Activity `theme_connection` — optionally mention how the theme resonates \
-  with specific children's interests from their bio.
-- Newsletter `welcome_message` and `warm_version` — may reference the \
-  group by the educator's style, but keep it general enough for all families.
-
-Personalisation guidelines:
+Guidelines:
 - Reference every child at least once across the week.
-- If a child has special tags (e.g. 'speech_delay', 'high_energy'), \
-  explicitly mention strategies for them in relevant activities.
-- Keep language warm, professional, and encouraging.
-- Preserve the exact JSON structure — your output must be a valid \
-  WeekPlanSchema.
+- For children with special tags (e.g. 'speech_delay'), mention strategies.
+- Keep language warm, professional, encouraging.
+- Output must be a valid WeekPlanSchema preserving exact JSON structure.
 """
 
 
@@ -116,8 +97,8 @@ async def personalize_plan(state: PlannerState) -> dict:
             "error": None,
         }
 
-    # ── Serialize plan for the prompt ─────────────────────────
-    plan_json = json.dumps(draft_plan, indent=2)
+    # ── Serialize plan for the prompt (compact to reduce tokens) ──
+    plan_json = json.dumps(draft_plan, separators=(',', ':'))
 
     # Include auditor praise if available (reinforces what's strong)
     auditor_praise = ""

@@ -198,7 +198,10 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 | **Service name** | `early-nurturer-api` |
 | **URL** | `https://early-nurturer-api-872290613394.us-central1.run.app` |
 | **Region** | `us-central1` |
-| **Memory** | 1 GiB |
+| **Memory** | 2 GiB |
+| **CPU** | 2 vCPU |
+| **Min instances** | 1 (always warm, no cold starts) |
+| **CPU throttling** | Disabled (always allocated) |
 | **Timeout** | 300s (5 min, for long Gemini pipeline) |
 | **Port** | 8080 |
 | **Auth** | Unauthenticated (public) |

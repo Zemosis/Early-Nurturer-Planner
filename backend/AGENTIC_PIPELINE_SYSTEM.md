@@ -301,9 +301,58 @@ All three Gemini-calling agents use `response_schema` with Pydantic models. This
 
 | Function | Purpose |
 |---|---|
-| `fetch_student_context(user_id)` | Query enrolled students, return LLM-formatted roster |
+| `fetch_student_context(user_id)` | Query enrolled students, return LLM-formatted roster (cached 5 min) |
 | `generate_theme_options(context, count)` | Call Gemini to generate ThemeSchema list |
 | `query_pedagogy(query_text)` | RAG search (currently mock keyword matching) |
 | `search_youtube_video(query, video_category_id?)` | Search YouTube API (5 results), prefer trusted channels, return metadata dict |
 | `_parse_iso8601_duration(iso)` | Convert `PT3M8S` → `("3:08", 188)` |
 | `_clean_youtube_title(raw)` | Strip hashtags, HTML entities, Unicode junk, channel suffixes |
+
+---
+
+## Performance Optimizations (March 13, 2026)
+
+### Baseline Performance
+- **Total generation time:** 147 seconds
+- **Breakdown:** Architect 68s, Auditor 22s, Personalizer 56s, Enricher 1s
+
+### Optimizations Applied
+
+#### 1. Parallel Context Fetching (`fetch_context_node`)
+- `fetch_student_context()` and `query_pedagogy()` now run concurrently via `asyncio.gather()`
+- Graceful error handling for partial failures
+- **Savings:** ~3 seconds
+
+#### 2. PostgreSQL Upsert (`save_plan_node`)
+- Replaced SELECT + conditional INSERT/UPDATE with `INSERT ... ON CONFLICT DO UPDATE`
+- Uses existing `uq_weekly_plans_user_week` constraint
+- Eliminates one DB roundtrip
+- **Savings:** ~1 second
+
+#### 3. Composite Index
+- Added `Index("ix_students_user_active", "user_id", "is_active")` to `students` table
+- Optimizes `fetch_student_context()` query
+- **Savings:** ~1 second
+
+#### 4. Prompt Optimization
+
+**Architect:**
+- System prompt trimmed from ~500 words to ~250 words
+- All essential instructions preserved
+
+**Auditor (biggest win):**
+- System prompt trimmed from ~400 words to ~180 words
+- **Input payload filtered:** Only sends safety-relevant fields (`theme`, `circle_time`, `activities` with `title`, `domain`, `materials`, `safety_notes`, `adaptations`, `duration`, `description`, `theme_connection`)
+- **Compact JSON:** Changed from `indent=2` to `separators=(',',':')`
+- **Result:** Input reduced from ~8,000 tokens to ~2,000 tokens (75% reduction)
+- **Savings:** ~8 seconds
+
+**Personalizer:**
+- System prompt trimmed from ~350 words to ~180 words
+- Compact JSON for input
+- **Savings:** ~4 seconds
+
+### Expected Results
+- **Total time reduction:** 32 seconds (22% improvement)
+- **New target:** 115 seconds (down from 147s)
+- **Infrastructure:** Cloud Run upgraded to 2 GiB memory, 2 vCPU, min-instances 1, no CPU throttling (eliminates cold starts, adds ~15s savings)

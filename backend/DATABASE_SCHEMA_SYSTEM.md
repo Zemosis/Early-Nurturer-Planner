@@ -99,7 +99,11 @@ Child profiles — mirrors frontend `Student` interface (`src/app/types/student.
 | `created_at` | TIMESTAMPTZ | | |
 | `updated_at` | TIMESTAMPTZ | | |
 
-**Indexes:** `ix_students_user_id`, `ix_students_age_group`
+**Indexes:** 
+- `ix_students_user_id` — Single-column index on `user_id`
+- `ix_students_user_active` — Composite index on `(user_id, is_active)` (added March 13, 2026 for performance)
+- `ix_students_age_group` — Single-column index on `age_group`
+
 **Relationships:** `user` (N:1), `embeddings` (1:N cascade)
 
 ---

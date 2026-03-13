@@ -123,6 +123,7 @@ class Student(Base):
 
     __table_args__ = (
         Index("ix_students_user_id", "user_id"),
+        Index("ix_students_user_active", "user_id", "is_active"),
         Index("ix_students_age_group", "age_group"),
     )
 

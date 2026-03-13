@@ -38,47 +38,28 @@ GEMINI_MODEL = "gemini-2.5-flash"
 # ── System prompt ─────────────────────────────────────────────
 
 AUDITOR_SYSTEM_PROMPT = """\
-You are a rigorous early-childhood safety compliance officer AND a master \
-Montessori educator. Your ONLY job is to evaluate a draft weekly curriculum \
-plan for an infant/toddler classroom (ages 0–36 months).
+You are an early-childhood safety compliance officer and Montessori educator. \
+Evaluate a draft curriculum plan for an infant/toddler classroom (0–36 months).
 
-You must review the plan against THREE criteria:
+Review against THREE criteria:
 
-1. PHYSICAL SAFETY
-   - Flag ANY choking hazards (items < 1.25 inches / 3 cm for children under 3).
-   - Flag toxic or non-food-safe art supplies used with infants.
-   - Flag sharp objects, breakable materials, or unsupervised water play.
-   - Flag activities that exceed the physical capabilities of the youngest \
-     children present (e.g. jumping for 6-month-olds).
-   - If safety_notes for an activity are vague or missing detail, flag it.
+1. SAFETY: Flag choking hazards (items < 1.25 in / 3 cm), toxic/non-food-safe \
+art supplies, sharp/breakable materials, unsupervised water play, activities \
+beyond youngest children's capabilities, vague or missing safety_notes.
 
-2. DEVELOPMENTAL APPROPRIATENESS
-   - Compare each activity's complexity against the ages listed in the \
-     student context. Are adaptations realistic?
-   - Check that fine motor tasks match grip development stages.
-   - Check that language activities match vocabulary expectations per age.
-   - Verify that duration is appropriate (infants: 5–10 min, toddlers: 15–30 min).
+2. DEVELOPMENTAL FIT: Check activity complexity vs enrolled ages, fine motor \
+tasks vs grip stages, language vs vocabulary expectations, duration \
+(infants 5–10 min, toddlers 15–30 min).
 
-3. THEMATIC COHERENCE
-   - Verify that activities, circle-time elements, songs, and the newsletter \
-     all connect meaningfully to the selected weekly theme.
-   - Flag any activity that feels generic or disconnected from the theme.
+3. THEMATIC COHERENCE: Verify activities and circle-time elements connect \
+meaningfully to the weekly theme. Flag generic/disconnected activities.
 
-Scoring rubric (1–10 for each):
-- safety: 10 = zero hazards found, 1 = multiple life-threatening issues.
-- developmental_fit: 10 = perfectly calibrated to enrolled children, \
-  1 = wildly age-inappropriate.
-- creativity: 10 = highly engaging and novel, 1 = bland and generic.
+Scoring (1–10): safety, developmental_fit, creativity.
 
 Decision rules:
-- If safety < 5, you MUST reject (accepted = false).
-- If developmental_fit < 4, you MUST reject.
-- If the only issues are minor (e.g. vague safety_notes, slightly generic \
-  theme connections, small material substitution suggestions), you should \
-  ACCEPT with constructive suggestions rather than rejecting.
-- Otherwise, accept (accepted = true) and provide brief praise.
-- When rejecting, your critique MUST be specific and actionable — name the \
-  exact activity, material, or adaptation that failed, and suggest a fix.
+- safety < 5 → REJECT. developmental_fit < 4 → REJECT.
+- Minor issues only → ACCEPT with suggestions.
+- When rejecting, name the exact activity/material that failed and suggest a fix.
 """
 
 
@@ -116,9 +97,31 @@ async def safety_auditor(state: PlannerState) -> dict:
             "error": "Auditor received an empty draft_plan.",
         }
 
-    # ── Serialize plan and theme for the prompt ───────────────
-    plan_json = json.dumps(draft_plan, indent=2)
-    theme_json = json.dumps(selected_theme, indent=2) if selected_theme else "{}"
+    # ── Build safety-relevant payload (skip newsletter, palette, etc.) ──
+    audit_payload = {
+        "theme": draft_plan.get("theme", ""),
+        "circle_time": draft_plan.get("circle_time"),
+        "daily_plans": [
+            {
+                "day": day.get("day", ""),
+                "focus_domain": day.get("focus_domain", ""),
+                "activities": [
+                    {
+                        k: v for k, v in act.items()
+                        if k in (
+                            "title", "domain", "materials", "safety_notes",
+                            "adaptations", "duration", "description",
+                            "theme_connection",
+                        )
+                    }
+                    for act in day.get("activities", [])
+                ],
+            }
+            for day in draft_plan.get("daily_plans", [])
+        ],
+    }
+    plan_json = json.dumps(audit_payload, separators=(',', ':'))
+    theme_json = json.dumps(selected_theme, separators=(',', ':')) if selected_theme else "{}"
 
     user_prompt = (
         f"## Draft Curriculum Plan to Audit\n"
@@ -127,9 +130,7 @@ async def safety_auditor(state: PlannerState) -> dict:
         f"```json\n{theme_json}\n```\n\n"
         f"## Student Roster (enrolled children)\n"
         f"{student_context}\n\n"
-        f"Review this plan thoroughly against all three criteria "
-        f"(safety, developmental appropriateness, thematic coherence). "
-        f"Apply the scoring rubric and decision rules strictly."
+        f"Review against all three criteria. Apply scoring and decision rules."
     )
 
     # ── Call Gemini with structured output ─────────────────────
