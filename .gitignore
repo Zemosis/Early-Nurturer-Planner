@@ -32,3 +32,6 @@ nurture-backend-sa-key-v2.json
 # Logs
 *.log
 npm-debug.log*
+
+# GCP Bucket
+backend/data_prep/

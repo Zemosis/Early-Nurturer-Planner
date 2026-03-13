@@ -440,3 +440,41 @@ class VectorStoreCurriculum(Base):
     __table_args__ = (
         Index("ix_curriculum_source_chunk", "source_document", "chunk_index"),
     )
+
+
+class YogaPose(Base):
+    """Static yoga pose catalog extracted from the Om Yoga Flow PDF.
+
+    Each row represents a single pose with its image (hosted on GCS),
+    instructions, creative cues, and a 768-dim embedding for
+    semantic matching against LLM-suggested pose names.
+    """
+
+    __tablename__ = "yoga_poses"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(
+        String(255), unique=True, nullable=False,
+        doc="Pose display name, e.g. 'Downward Facing Dog Pose'."
+    )
+    image_url: Mapped[str] = mapped_column(
+        String(512), nullable=False,
+        doc="Public GCS URL to the pose photo."
+    )
+    how_to: Mapped[list | None] = mapped_column(
+        JSONB, default=list,
+        doc='Step-by-step instructions as a list of strings.'
+    )
+    creative_cues: Mapped[list | None] = mapped_column(
+        JSONB, default=list,
+        doc='Kid-friendly creative cues as a list of strings.'
+    )
+    embedding: Mapped[list | None] = mapped_column(
+        Vector(EMBEDDING_DIM), nullable=True,
+        doc=f"pgvector column — {EMBEDDING_DIM}-dim float vector for semantic search."
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

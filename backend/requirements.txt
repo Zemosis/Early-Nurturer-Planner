@@ -23,6 +23,9 @@ google-cloud-storage>=2.18.0
 google-cloud-aiplatform>=1.72.0
 google-genai>=1.0.0
 
+# PDF extraction
+PyMuPDF>=1.24.0
+
 # LangGraph / LangChain
 langgraph>=0.2.0
 langchain>=0.3.0
