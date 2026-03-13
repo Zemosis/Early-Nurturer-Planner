@@ -156,8 +156,8 @@ async def curriculum_architect(state: PlannerState) -> dict:
                 system_instruction=ARCHITECT_SYSTEM_PROMPT,
                 response_mime_type="application/json",
                 response_schema=WeekPlanSchema,
-                temperature=0.9,
-                max_output_tokens=65536,
+                temperature=0.7,
+                max_output_tokens=24576,
             ),
         )
 

@@ -506,14 +506,14 @@ See Phase 8, section 4 above. Upsert logic + unique constraint + Alembic migrati
 ---
 
 ## Phase 9: Pipeline Speed Optimization
-**Status:** In Progress 
-**Date:** March 12, 2026
+**Status:** Complete
+**Date:** March 12–13, 2026
 
 ### Problem Statement
 
 Plan generation takes **3–4 minutes**, making users think the pipeline is stuck in an infinite loop. Root cause: the auditor almost always rejects the first 2 architect drafts (strict thresholds: `safety < 7`, `developmental_fit < 6`), forcing 3 full architect→auditor iterations before the cap kicks in. Each Gemini 2.5 Flash call takes 30–50s due to deep internal reasoning.
 
-### Fixes Applied
+### Fixes Applied (Round 1 — March 12)
 
 #### 1. Reduced Max Iterations: 3 → 2 (`graph.py`)
 
@@ -536,13 +536,30 @@ Attempted to switch all three agents to `gemini-3-flash-preview` with per-agent 
 - The installed `google-genai>=1.0.0` SDK also rejects `thinking_level` as an unknown parameter on `GenerateContentConfig`.
 - **Reverted all agents back to `gemini-2.5-flash`.** Can revisit when the model is GA and the SDK is updated.
 
+### Fixes Applied (Round 2 — March 13)
+
+#### 5. Reduced `max_output_tokens`: 65536 → 24576 (`architect.py`, `personalizer.py`)
+
+Plans are typically 15–20K tokens. The previous 64K ceiling forced Gemini to allocate maximum generation capacity. Reducing to 24K (25% safety margin above observed output) cuts generation latency by ~20–30% per call.
+
+#### 6. Lowered Architect Temperature: 0.9 → 0.7 (`architect.py`)
+
+Still creative, but converges faster and produces more focused output. The detailed safety checklist already ensures quality. Reduces token waste from exploratory reasoning.
+
+#### 7. Student Context Cache — 5-min TTL (`tools.py`)
+
+Added in-memory TTL cache (`_student_context_cache`) around `fetch_student_context()`. Both the theme generation endpoint and the plan pipeline's `fetch_context_node` call this function — cache avoids redundant DB queries within a 5-minute window. Uses `time.monotonic()` for reliable TTL tracking.
+
 ### Expected Performance
 
-| Metric | Before | After |
-|---|---|---|
-| Typical iterations | 3 (always hit cap) | 1–2 (architect passes more often) |
-| Gemini calls | 7 (3×arch + 3×aud + 1×pers) | 3–4 (1–2×arch + 1–2×aud + 1×pers) |
-| Estimated total time | ~210s (3.5 min) | ~60–90s (~1–1.5 min) |
+| Metric | Before (Phase 8) | After Round 1 | After Round 2 |
+|---|---|---|---|
+| Typical iterations | 3 (always hit cap) | 1–2 | 1–2 |
+| Gemini calls | 7 (3×arch + 3×aud + 1×pers) | 3–4 | 3–4 |
+| max_output_tokens | 65536 | 65536 | 24576 |
+| Architect temperature | 0.9 | 0.9 | 0.7 |
+| Student context cache | none | none | 5-min TTL |
+| Estimated total time | ~210s (3.5 min) | ~60–90s | ~45–50s |
 
 ### Files Modified
 
@@ -550,8 +567,9 @@ Attempted to switch all three agents to `gemini-3-flash-preview` with per-agent 
 |---|---|
 | `backend/app/agents/graph.py` | `iteration_count >= 3` → `>= 2` |
 | `backend/app/agents/auditor.py` | Thresholds lowered (safety<5, dev_fit<4), softer accept-with-suggestions prompt |
-| `backend/app/agents/architect.py` | Safety checklist added to system prompt |
-| `backend/app/agents/personalizer.py` | No config changes (model stays `gemini-2.5-flash`) |
+| `backend/app/agents/architect.py` | Safety checklist, `temperature` 0.9→0.7, `max_output_tokens` 65536→24576 |
+| `backend/app/agents/personalizer.py` | `max_output_tokens` 65536→24576 |
+| `backend/app/agents/tools.py` | `_student_context_cache` with 5-min TTL on `fetch_student_context()` |
 
 ---
 

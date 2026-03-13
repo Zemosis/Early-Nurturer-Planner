@@ -150,7 +150,7 @@ async def personalize_plan(state: PlannerState) -> dict:
                 response_mime_type="application/json",
                 response_schema=WeekPlanSchema,
                 temperature=0.5,
-                max_output_tokens=65536,
+                max_output_tokens=24576,
             ),
         )
 

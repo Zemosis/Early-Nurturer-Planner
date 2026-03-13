@@ -9,6 +9,7 @@ curriculum generation and personalisation.
 
 import html as _html
 import logging
+import time
 import uuid
 from urllib.parse import quote_plus
 
@@ -34,6 +35,10 @@ gemini_client = genai.Client(
 
 GEMINI_MODEL = "gemini-2.5-flash"
 
+# ── In-memory student context cache (5-min TTL) ──────────────
+_student_context_cache: dict[str, tuple[float, str]] = {}  # {user_id: (expires_at, context)}
+_CACHE_TTL_SECONDS = 300  # 5 minutes
+
 
 async def fetch_student_context(user_id: str) -> str:
     """Retrieve all active students for an educator and return a formatted summary.
@@ -56,6 +61,13 @@ async def fetch_student_context(user_id: str) -> str:
         2. Liam Chen (30 months, group 24-36m) — Very active and curious.
         Enjoys circle time and group activities. [tags: 24-36m]"
     """
+    # Check cache first
+    now = time.monotonic()
+    cached = _student_context_cache.get(user_id)
+    if cached and cached[0] > now:
+        logger.debug("StudentContext: cache hit for user=%s", user_id)
+        return cached[1]
+
     uid = uuid.UUID(user_id)
 
     async with async_session_factory() as session:
@@ -82,7 +94,13 @@ async def fetch_student_context(user_id: str) -> str:
         )
 
     header = f"Student context for educator ({len(students)} active students):"
-    return "\n".join([header, *lines])
+    result = "\n".join([header, *lines])
+
+    # Store in cache
+    _student_context_cache[user_id] = (now + _CACHE_TTL_SECONDS, result)
+    logger.debug("StudentContext: cached for user=%s (TTL=%ds)", user_id, _CACHE_TTL_SECONDS)
+
+    return result
 
 
 # ── AI Generation ─────────────────────────────────────────────
