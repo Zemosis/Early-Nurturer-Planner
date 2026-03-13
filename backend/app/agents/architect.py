@@ -63,6 +63,16 @@ Structural rules:
 - Palette hex codes must be valid 6-digit codes (e.g. '#7A9B76').
 - Song scripts should be 4–8 lines that an educator can sing or chant.
 
+SAFETY CHECKLIST — verify BEFORE outputting:
+- NO items smaller than 1.25 inches (3 cm) for children under 3 (choking).
+- NO toxic, non-food-safe, or sharp materials.
+- NO unsupervised water play.
+- NO activities exceeding physical capabilities of the youngest enrolled age.
+- Every activity has specific, detailed safety_notes (not vague).
+- Duration is age-appropriate: infants 5–10 min, toddlers 15–30 min.
+- Every activity meaningfully connects to the weekly theme.
+If any item fails this checklist, fix it before generating your response.
+
 Use the provided student context to tailor activity complexity, and the \
 pedagogy context to ground your choices in evidence-based practice.
 """

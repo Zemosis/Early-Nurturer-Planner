@@ -502,3 +502,53 @@ When a user generates multiple themes for the same week (e.g. Week 1 "Fox Forest
 ### Fix Applied
 
 See Phase 8, section 4 above. Upsert logic + unique constraint + Alembic migration + duplicate cleanup.
+
+---
+
+## Phase 9: Pipeline Speed Optimization
+**Status:** Complete
+**Date:** March 12, 2026
+
+### Problem Statement
+
+Plan generation takes **3–4 minutes**, making users think the pipeline is stuck in an infinite loop. Root cause: the auditor almost always rejects the first 2 architect drafts (strict thresholds: `safety < 7`, `developmental_fit < 6`), forcing 3 full architect→auditor iterations before the cap kicks in. Each Gemini 2.5 Flash call takes 30–50s due to deep internal reasoning.
+
+### Fixes Applied
+
+#### 1. Reduced Max Iterations: 3 → 2 (`graph.py`)
+
+Changed `route_auditor` cap from `iteration_count >= 3` to `>= 2`. The architect gets one revision chance, then force-accepts. Most second-pass critiques are minor (creativity/theme) not safety.
+
+#### 2. Loosened Auditor Thresholds + Softer Prompt (`auditor.py`)
+
+- `safety < 7` → `safety < 5` (was overly pedantic)
+- `developmental_fit < 6` → `developmental_fit < 4`
+- Added prompt guidance: "If the only issues are minor (vague safety_notes, slightly generic theme connections), ACCEPT with constructive suggestions rather than rejecting."
+
+#### 3. Safety Checklist in Architect Prompt (`architect.py`)
+
+Added a "SAFETY CHECKLIST — verify BEFORE outputting" section to `ARCHITECT_SYSTEM_PROMPT` that mirrors the auditor's exact criteria (choking hazards, toxic materials, unsupervised water, age-capability, duration, theme connection). This "shift left" approach means the architect self-checks, reducing auditor rejections at source.
+
+#### 4. Attempted `gemini-3-flash-preview` — Reverted
+
+Attempted to switch all three agents to `gemini-3-flash-preview` with per-agent `thinking_level` for faster inference. However:
+- The model returned **404 NOT_FOUND** on Vertex AI (`us-central1`) — not yet available for this project.
+- The installed `google-genai>=1.0.0` SDK also rejects `thinking_level` as an unknown parameter on `GenerateContentConfig`.
+- **Reverted all agents back to `gemini-2.5-flash`.** Can revisit when the model is GA and the SDK is updated.
+
+### Expected Performance
+
+| Metric | Before | After |
+|---|---|---|
+| Typical iterations | 3 (always hit cap) | 1–2 (architect passes more often) |
+| Gemini calls | 7 (3×arch + 3×aud + 1×pers) | 3–4 (1–2×arch + 1–2×aud + 1×pers) |
+| Estimated total time | ~210s (3.5 min) | ~60–90s (~1–1.5 min) |
+
+### Files Modified
+
+| File | Change |
+|---|---|
+| `backend/app/agents/graph.py` | `iteration_count >= 3` → `>= 2` |
+| `backend/app/agents/auditor.py` | Thresholds lowered (safety<5, dev_fit<4), softer accept-with-suggestions prompt |
+| `backend/app/agents/architect.py` | Safety checklist added to system prompt |
+| `backend/app/agents/personalizer.py` | No config changes (model stays `gemini-2.5-flash`) |

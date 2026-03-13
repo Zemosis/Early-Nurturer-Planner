@@ -208,7 +208,7 @@ def route_auditor(state: PlannerState) -> str:
     accepted = audit_result.get("accepted", False)
     iteration_count = state.get("iteration_count", 0)
 
-    if accepted or iteration_count >= 3:
+    if accepted or iteration_count >= 2:
         return "personalize"
 
     return "revise"

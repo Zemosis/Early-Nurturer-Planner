@@ -116,6 +116,12 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 - Newsletter with professional and warm versions
 - Kebab-case IDs, valid hex palette codes
 
+**Built-in safety checklist (shift-left):**
+- NO items < 1.25” for children under 3, NO toxic/sharp materials, NO unsupervised water
+- Every activity must have specific safety_notes and age-appropriate duration
+- Every activity must meaningfully connect to the weekly theme
+- Architect self-checks against these before outputting, reducing auditor rejections
+
 ---
 
 ### 3. Safety Auditor (`auditor.py`)
@@ -140,8 +146,9 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 - `creativity` — 10 = highly engaging, 1 = bland
 
 **Decision rules:**
-- `safety < 7` → **MUST reject**
-- `developmental_fit < 6` → **MUST reject**
+- `safety < 5` → **MUST reject**
+- `developmental_fit < 4` → **MUST reject**
+- Minor issues (vague safety_notes, slightly generic theme connections) → **ACCEPT with suggestions**
 - Otherwise → accept with praise
 
 **Does NOT modify** `iteration_count` — that's the Architect's job.
@@ -236,18 +243,18 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 **Purpose:** Conditional edge that decides whether to revise or proceed.
 
 **Returns:**
-- `"personalize"` → routes to personalizer if accepted, iteration cap (≥3) reached, or error present
+- `"personalize"` → routes to personalizer if accepted, iteration cap (≥2) reached, or error present
 - `"revise"` → if rejected and iterations remain
 
 ---
 
 ## Temperature Strategy
 
-| Agent | Temperature | Rationale |
-|---|---|---|
-| Architect | 0.9 | Creative, diverse curriculum generation |
-| Auditor | 0.3 | Deterministic, consistent safety evaluation |
-| Personalizer | 0.5 | Balanced — creative enough for child references, stable enough for structure |
+| Agent | Model | Temperature | Rationale |
+|---|---|---|---|
+| Architect | `gemini-2.5-flash` | 0.9 | Creative generation, self-checks safety via built-in checklist |
+| Auditor | `gemini-2.5-flash` | 0.3 | Deterministic pass/fail eval with relaxed thresholds |
+| Personalizer | `gemini-2.5-flash` | 0.5 | Balanced — creative for child references, stable structure |
 
 ---
 
@@ -261,7 +268,7 @@ All three Gemini-calling agents use `response_schema` with Pydantic models. This
 
 ## Error Resilience
 
-- **Iteration cap:** Max 3 Architect passes before force-accepting
+- **Iteration cap:** Max 2 Architect passes before force-accepting
 - **Error routing:** `route_auditor` checks for errors and routes forward to avoid infinite loops
 - **Fallback chain:** `personalized_plan` → `draft_plan` → error
 - **Surrogate sanitizer:** Regex strips Gemini's invalid Unicode surrogate escapes before Pydantic validation

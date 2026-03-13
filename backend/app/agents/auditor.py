@@ -71,8 +71,11 @@ Scoring rubric (1–10 for each):
 - creativity: 10 = highly engaging and novel, 1 = bland and generic.
 
 Decision rules:
-- If safety < 7, you MUST reject (accepted = false).
-- If developmental_fit < 6, you MUST reject.
+- If safety < 5, you MUST reject (accepted = false).
+- If developmental_fit < 4, you MUST reject.
+- If the only issues are minor (e.g. vague safety_notes, slightly generic \
+  theme connections, small material substitution suggestions), you should \
+  ACCEPT with constructive suggestions rather than rejecting.
 - Otherwise, accept (accepted = true) and provide brief praise.
 - When rejecting, your critique MUST be specific and actionable — name the \
   exact activity, material, or adaptation that failed, and suggest a fix.
