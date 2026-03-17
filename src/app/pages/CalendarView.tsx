@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useNavigate } from "react-router";
-import { ArrowLeft, CheckCircle2, Loader2, GripVertical, LayoutList, Check, X, MessageCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, GripVertical, LayoutList, Check, X, MessageCircle, Trash2 } from "lucide-react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { ChatAssistant } from "../components/ChatAssistant";
 import { usePlanner } from "../contexts/PlannerContext";
-import { fetchAllPlans, reorderPlans, WeekPlanSummary, PlanPositionUpdate } from "../utils/api";
+import { fetchAllPlans, reorderPlans, deletePlan, WeekPlanSummary, PlanPositionUpdate } from "../utils/api";
 
 const MONTH_NAMES = [
   "", "January", "February", "March", "April", "May", "June",
@@ -19,11 +19,13 @@ const DRAG_TYPE = "week-plan-card";
 interface WeekCardProps {
   plan: WeekPlanSummary;
   index: number;
+  displayIndex: number;
   rearrangeMode: boolean;
   onMove: (fromIndex: number, toIndex: number) => void;
+  onDelete: (plan: WeekPlanSummary) => void;
 }
 
-function WeekCard({ plan, index, rearrangeMode, onMove }: WeekCardProps) {
+function WeekCard({ plan, index, displayIndex, rearrangeMode, onMove, onDelete }: WeekCardProps) {
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const primaryColor = plan.palette?.primary || "#387F39";
@@ -79,13 +81,24 @@ function WeekCard({ plan, index, rearrangeMode, onMove }: WeekCardProps) {
               <CheckCircle2 className="w-4 h-4" style={{ color: primaryColor }} />
             </div>
             <p className="text-sm text-muted-foreground">
-              Week {plan.week_of_month} • {plan.week_range}
+              Week {displayIndex} • {plan.week_range}
             </p>
           </div>
         </div>
-        <span className="text-xs text-muted-foreground bg-muted/40 px-2 py-1 rounded-lg">
-          #{plan.global_week_number}
-        </span>
+        <div className="flex items-center gap-2">
+          {!rearrangeMode && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(plan); }}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
+              title="Delete plan"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+          <span className="text-xs text-muted-foreground bg-muted/40 px-2 py-1 rounded-lg">
+            #{displayIndex}
+          </span>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -118,6 +131,9 @@ export default function CalendarView() {
   // Local ordered copy used while rearranging (flat, sorted by week_number)
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [localPlans, setLocalPlans] = useState<WeekPlanSummary[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState<WeekPlanSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   // Snapshot before rearranging — used to revert on cancel/error
   const originalRef = useRef<WeekPlanSummary[]>([]);
 
@@ -167,19 +183,33 @@ export default function CalendarView() {
     });
   }, []);
 
+  const handleDeleteRequest = (plan: WeekPlanSummary) => {
+    setConfirmDelete(plan);
+    setDeleteError(null);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deletePlan(confirmDelete.id);
+      const fresh = await fetchAllPlans();
+      setAllPlans(fresh);
+      setConfirmDelete(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const saveReorder = async () => {
     setSaving(true);
     setSaveError(null);
-    // Build swap payload: assign each plan the positional fields of the slot
-    // it now occupies (taken from the original ordered list)
-    const origSorted = originalRef.current;
-    const updates: PlanPositionUpdate[] = localPlans.map((plan, idx) => ({
+    // Send ordered plan IDs — server recomputes all date fields
+    const updates: PlanPositionUpdate[] = localPlans.map((plan) => ({
       plan_id: plan.id,
-      week_number: origSorted[idx].global_week_number,
-      week_range: origSorted[idx].week_range,
-      year: origSorted[idx].year,
-      month: origSorted[idx].month,
-      week_of_month: origSorted[idx].week_of_month,
     }));
 
     try {
@@ -194,8 +224,12 @@ export default function CalendarView() {
     }
   };
 
+  // Global sorted list used for 1-based display index in normal view
+  const sortedAll = [...allPlans].sort((a, b) => a.global_week_number - b.global_week_number);
+  const planDisplayIndex = new Map(sortedAll.map((p, i) => [p.id, i + 1]));
+
   // Group the display plans by year-month
-  const displayPlans = rearrangeMode ? localPlans : [...allPlans].sort((a, b) => a.global_week_number - b.global_week_number);
+  const displayPlans = rearrangeMode ? localPlans : sortedAll;
 
   const grouped = new Map<string, WeekPlanSummary[]>();
   for (const plan of displayPlans) {
@@ -308,8 +342,10 @@ export default function CalendarView() {
                       key={plan.id}
                       plan={plan}
                       index={idx}
+                      displayIndex={idx + 1}
                       rearrangeMode={rearrangeMode}
                       onMove={handleMove}
+                      onDelete={handleDeleteRequest}
                     />
                   ))}
                 </div>
@@ -324,14 +360,16 @@ export default function CalendarView() {
                       <h2 className="text-lg font-medium text-foreground mb-4">{monthLabel}</h2>
                       <div className="space-y-4">
                         {plans
-                          .sort((a, b) => a.week_of_month - b.week_of_month)
-                          .map((plan, idx) => (
+                          .sort((a, b) => (planDisplayIndex.get(a.id) ?? 0) - (planDisplayIndex.get(b.id) ?? 0))
+                          .map((plan) => (
                             <WeekCard
                               key={plan.id}
                               plan={plan}
-                              index={idx}
+                              index={planDisplayIndex.get(plan.id)! - 1}
+                              displayIndex={planDisplayIndex.get(plan.id)!}
                               rearrangeMode={false}
                               onMove={handleMove}
+                              onDelete={handleDeleteRequest}
                             />
                           ))}
                       </div>
@@ -344,6 +382,41 @@ export default function CalendarView() {
         </main>
 
         <ChatAssistant isOpen={isChatOpen} onToggle={() => setIsChatOpen(!isChatOpen)} />
+
+        {/* Delete confirmation dialog */}
+        {confirmDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
+              <h2 className="text-lg font-semibold text-foreground mb-1">Delete plan?</h2>
+              <p className="text-sm text-muted-foreground mb-1">
+                <strong>{confirmDelete.theme}</strong> will be permanently deleted.
+              </p>
+              <p className="text-sm text-muted-foreground mb-4">
+                Remaining plans will be renumbered automatically.
+              </p>
+              {deleteError && (
+                <p className="text-sm text-destructive mb-3">{deleteError}</p>
+              )}
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  disabled={deleting}
+                  className="px-4 py-2 rounded-xl text-sm border border-border hover:bg-muted/50 transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  disabled={deleting}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm bg-destructive text-white hover:bg-destructive/90 transition-all disabled:opacity-50"
+                >
+                  {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  {deleting ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </DndProvider>
   );

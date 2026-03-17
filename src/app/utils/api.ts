@@ -122,11 +122,19 @@ export interface WeekPlanSummary {
 
 export interface PlanPositionUpdate {
   plan_id: string;
-  week_number: number;
-  week_range: string;
-  year: number;
-  month: number;
-  week_of_month: number;
+}
+
+export async function deletePlan(
+  planId: string,
+  userId: string = DEFAULT_USER_ID
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/planner/${userId}/plan/${planId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Delete failed");
+  }
 }
 
 export async function reorderPlans(

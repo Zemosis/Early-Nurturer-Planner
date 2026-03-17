@@ -40,14 +40,9 @@ class GeneratePlanRequest(BaseModel):
 
 
 class PlanPositionUpdate(BaseModel):
-    """A single plan's new positional fields for the reorder endpoint."""
+    """A single plan ID in the new desired order."""
 
     plan_id: str
-    week_number: int
-    week_range: str
-    year: int
-    month: int
-    week_of_month: int
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -90,13 +85,10 @@ async def generate_plan(request: GeneratePlanRequest):
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid user_id")
 
-    # Compute calendar week info
-    week_info = _compute_week_info()
-
-    # Compute global week number (max existing + 1)
+    # Compute global week number (max existing + 1) and mark pool theme used
     async with async_session_factory() as session:
         result = await session.execute(
-            select(func.coalesce(func.max(WeeklyPlan.week_number), 0))
+            select(func.count(WeeklyPlan.id))
             .where(WeeklyPlan.user_id == user_uid)
         )
         global_week_number = result.scalar() + 1
@@ -117,6 +109,12 @@ async def generate_plan(request: GeneratePlanRequest):
                     await session.commit()
             except Exception as e:
                 logger.warning("Failed to mark pool theme as used: %s", e)
+
+    # Offset week info so plan N starts N-1 weeks from today,
+    # giving each curriculum week a distinct real-world date range
+    week_info = _compute_week_info(
+        today=date.today() + timedelta(weeks=global_week_number - 1)
+    )
 
     try:
         graph_app = build_planner_graph()
@@ -217,12 +215,13 @@ async def list_plans(user_id: str):
 
 @router.patch("/{user_id}/plans/reorder")
 async def reorder_plans(user_id: str, updates: list[PlanPositionUpdate]):
-    """Swap positional fields (week_number, week_range, year, month, week_of_month)
-    across a set of plans in a single atomic transaction.
+    """Reorder plans to match the client-supplied sequence of plan IDs.
 
-    Uses a two-phase update to avoid unique-constraint violations:
-      Phase 1 — set each plan's week_number to a temporary negative value
-      Phase 2 — set each plan's week_number (and other fields) to the target
+    The server recomputes all date fields (week_number, week_range, year,
+    month, week_of_month) so Curriculum Week N always maps to
+    today + (N-1) calendar weeks.
+
+    Uses a two-phase update to avoid unique-constraint violations.
     """
     try:
         user_uid = uuid.UUID(user_id)
@@ -253,26 +252,27 @@ async def reorder_plans(user_id: str, updates: list[PlanPositionUpdate]):
             raise HTTPException(status_code=404, detail=f"Plans not found: {missing}")
 
         # ── Phase 1: vacate unique slots with temporary negative week_numbers ──
-        for i, u in enumerate(updates):
-            temp_num = -(i + 1)
+        for i, uid in enumerate(plan_uids):
             await session.execute(
                 sa_update(WeeklyPlan)
-                .where(WeeklyPlan.id == uuid.UUID(u.plan_id), WeeklyPlan.user_id == user_uid)
-                .values(week_number=temp_num)
+                .where(WeeklyPlan.id == uid, WeeklyPlan.user_id == user_uid)
+                .values(week_number=-(i + 1))
             )
         await session.flush()
 
-        # ── Phase 2: apply target positional values ──
-        for u in updates:
+        # ── Phase 2: assign sequential 1-based numbers with server-computed dates ──
+        today = date.today()
+        for new_num, uid in enumerate(plan_uids, start=1):
+            info = _compute_week_info(today=today + timedelta(weeks=new_num - 1))
             await session.execute(
                 sa_update(WeeklyPlan)
-                .where(WeeklyPlan.id == uuid.UUID(u.plan_id), WeeklyPlan.user_id == user_uid)
+                .where(WeeklyPlan.id == uid, WeeklyPlan.user_id == user_uid)
                 .values(
-                    week_number=u.week_number,
-                    week_range=u.week_range,
-                    year=u.year,
-                    month=u.month,
-                    week_of_month=u.week_of_month,
+                    week_number=new_num,
+                    week_range=info["week_range"],
+                    year=info["year"],
+                    month=info["month"],
+                    week_of_month=info["week_of_month"],
                 )
             )
 
@@ -348,6 +348,67 @@ async def get_plan(user_id: str, plan_id: str):
         "cover_image_url": plan_row.cover_image_url,
         "pdf_url": plan_row.pdf_url,
     }
+
+
+@router.delete("/{user_id}/plan/{plan_id}")
+async def delete_plan(user_id: str, plan_id: str):
+    """Delete a plan and renumber all remaining plans sequentially (1, 2, 3 …).
+
+    After renumbering, each plan's week_range / year / month / week_of_month
+    is recomputed so plan N represents the Nth week starting from today.
+    """
+    try:
+        user_uid = uuid.UUID(user_id)
+        plan_uid = uuid.UUID(plan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id or plan_id")
+
+    async with async_session_factory() as session:
+        # Verify plan exists and belongs to this user
+        result = await session.execute(
+            select(WeeklyPlan).where(
+                WeeklyPlan.id == plan_uid,
+                WeeklyPlan.user_id == user_uid,
+            )
+        )
+        plan_row = result.scalar_one_or_none()
+        if not plan_row:
+            raise HTTPException(status_code=404, detail="Plan not found.")
+
+        # Delete it
+        await session.delete(plan_row)
+        await session.flush()
+
+        # Fetch remaining plans ordered by current week_number
+        remaining_result = await session.execute(
+            select(WeeklyPlan)
+            .where(WeeklyPlan.user_id == user_uid)
+            .order_by(WeeklyPlan.week_number)
+        )
+        remaining = remaining_result.scalars().all()
+
+        # ── Phase 1: move to negative temp numbers to free unique slots ──
+        for i, p in enumerate(remaining):
+            p.week_number = -(i + 1)
+        await session.flush()
+
+        # ── Phase 2: assign sequential 1-based numbers with correct week info ──
+        today = date.today()
+        for new_num, p in enumerate(remaining, start=1):
+            info = _compute_week_info(today=today + timedelta(weeks=new_num - 1))
+            p.week_number = new_num
+            p.week_range = info["week_range"]
+            p.year = info["year"]
+            p.month = info["month"]
+            p.week_of_month = info["week_of_month"]
+
+        await session.commit()
+        logger.info(
+            "Deleted plan %s for user %s; renumbered %d remaining plans",
+            plan_id, user_id, len(remaining),
+        )
+
+    return {"deleted": plan_id, "remaining_count": len(remaining)}
 
 
 @router.get("/{user_id}/week/{week_number}/pdf")

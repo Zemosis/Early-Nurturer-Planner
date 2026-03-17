@@ -217,6 +217,9 @@ class WeeklyPlan(Base):
     cover_image_url: Mapped[str | None] = mapped_column(
         String(512), doc="Public GCS URL to the AI-generated cover image for this plan."
     )
+    pdf_url: Mapped[str | None] = mapped_column(
+        String(512), doc="Public GCS URL to the generated PDF for this plan."
+    )
     is_generated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -229,8 +232,8 @@ class WeeklyPlan(Base):
     user: Mapped["User"] = relationship(back_populates="weekly_plans")
 
     __table_args__ = (
-        UniqueConstraint("user_id", "year", "month", "week_of_month",
-                         name="uq_weekly_plans_user_year_month_week"),
+        UniqueConstraint("user_id", "week_number",
+                         name="uq_weekly_plans_user_week_number"),
         Index("ix_weekly_plans_user_created", "user_id", "created_at"),
     )
 
