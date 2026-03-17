@@ -71,3 +71,26 @@ export async function generatePlan(
 
   return res.json();
 }
+
+// ── PDF Download ────────────────────────────────────────────
+
+export interface DownloadPDFParams {
+  userId?: string;
+  weekNumber: number;
+}
+
+export async function downloadPlanPDF(
+  params: DownloadPDFParams
+): Promise<Blob> {
+  const userId = params.userId ?? DEFAULT_USER_ID;
+  const res = await fetch(
+    `${API_BASE}/api/planner/${userId}/week/${params.weekNumber}/pdf`
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "PDF download failed");
+  }
+
+  return res.blob();
+}

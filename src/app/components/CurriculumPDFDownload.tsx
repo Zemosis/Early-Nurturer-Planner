@@ -4,10 +4,9 @@
  */
 
 import { useState, useEffect } from 'react';
-import { FileText, Download, Eye, Printer, Check, Sparkles } from 'lucide-react';
+import { FileText, Download, Eye, Printer, Check, Sparkles, AlertCircle } from 'lucide-react';
 import { WeekPlan } from '../utils/mockData';
-import { generateCurriculumPDF, downloadPDF, PDFMetadata } from '../utils/pdfGenerator';
-import jsPDF from 'jspdf';
+import { downloadPlanPDF } from '../utils/api';
 
 interface CurriculumPDFDownloadProps {
   week: WeekPlan;
@@ -18,12 +17,13 @@ export function CurriculumPDFDownload({ week }: CurriculumPDFDownloadProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Generate week dates (example: "March 3-7, 2026")
   const getWeekDates = () => {
-    const startDate = new Date(2026, 2, 3 + (week.weekNumber - 1) * 7); // Starting March 3, 2026
+    const startDate = new Date(2026, 2, 3 + (week.weekNumber - 1) * 7);
     const endDate = new Date(startDate);
-    endDate.setDate(startDate.getDate() + 4); // Friday
+    endDate.setDate(startDate.getDate() + 4);
     
     const formatDate = (date: Date) => {
       return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
@@ -34,52 +34,72 @@ export function CurriculumPDFDownload({ week }: CurriculumPDFDownloadProps) {
     return `${start}–${end}, 2026`;
   };
 
-  const metadata: PDFMetadata = {
-    version: '1.0',
-    generatedDate: new Date().toLocaleDateString('en-US', { 
-      month: 'long', 
-      day: 'numeric', 
-      year: 'numeric' 
-    }),
-    weekDates: getWeekDates(),
+  const weekDates = getWeekDates();
+  const generatedDate = new Date().toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  const fetchPdfBlob = async (): Promise<Blob> => {
+    return downloadPlanPDF({ weekNumber: week.weekNumber });
   };
 
   const handleGenerateAndDownload = async () => {
     setIsGenerating(true);
-    
-    // Simulate AI generation delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    const pdf = generateCurriculumPDF(week, metadata);
-    const filename = `${week.theme.replace(/\s+/g, '_')}_Week${week.weekNumber}_Curriculum.pdf`;
-    downloadPDF(pdf, filename);
-    
-    setPdfGenerated(true);
-    setIsGenerating(false);
+    setError(null);
+
+    try {
+      const blob = await fetchPdfBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${week.theme.replace(/\s+/g, '_')}_Week${week.weekNumber}_Curriculum.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setPdfGenerated(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'PDF download failed');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  const handlePreview = () => {
+  const handlePreview = async () => {
     setIsGenerating(true);
-    
-    setTimeout(() => {
-      const pdf = generateCurriculumPDF(week, metadata);
-      const blob = pdf.output('blob');
+    setError(null);
+
+    try {
+      const blob = await fetchPdfBlob();
       const url = URL.createObjectURL(blob);
       setPdfUrl(url);
       setShowPreview(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'PDF preview failed');
+    } finally {
       setIsGenerating(false);
-    }, 800);
+    }
   };
 
-  const handlePrint = () => {
-    const pdf = generateCurriculumPDF(week, metadata);
-    const blob = pdf.output('blob');
-    const url = URL.createObjectURL(blob);
-    const printWindow = window.open(url);
-    if (printWindow) {
-      printWindow.addEventListener('load', () => {
-        printWindow.print();
-      });
+  const handlePrint = async () => {
+    setIsGenerating(true);
+    setError(null);
+
+    try {
+      const blob = await fetchPdfBlob();
+      const url = URL.createObjectURL(blob);
+      const printWindow = window.open(url);
+      if (printWindow) {
+        printWindow.addEventListener('load', () => {
+          printWindow.print();
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'PDF print failed');
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -125,15 +145,15 @@ export function CurriculumPDFDownload({ week }: CurriculumPDFDownloadProps) {
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Week</p>
-              <p className="font-medium text-foreground">Week {week.weekNumber} • {metadata.weekDates}</p>
+              <p className="font-medium text-foreground">Week {week.weekNumber} • {weekDates}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Version</p>
-              <p className="font-medium text-foreground">{metadata.version}</p>
+              <p className="font-medium text-foreground">1.0</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Last Updated</p>
-              <p className="font-medium text-foreground">{metadata.generatedDate}</p>
+              <p className="font-medium text-foreground">{generatedDate}</p>
             </div>
           </div>
         </div>
@@ -213,6 +233,14 @@ export function CurriculumPDFDownload({ week }: CurriculumPDFDownloadProps) {
             </div>
           </div>
         </div>
+
+        {/* Error Banner */}
+        {error && (
+          <div className="flex items-center gap-2 p-3 mb-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="space-y-3">

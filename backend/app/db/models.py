@@ -166,6 +166,9 @@ class WeeklyPlan(Base):
     newsletter: Mapped[dict | None] = mapped_column(
         JSONB, doc='{"professional": "...", "warm": "..."}'
     )
+    cover_image_url: Mapped[str | None] = mapped_column(
+        String(512), doc="Public GCS URL to the AI-generated cover image for this plan."
+    )
     is_generated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

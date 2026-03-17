@@ -1,0 +1,556 @@
+/* ── Weekly Curriculum PDF — Print-Ready Stylesheet ──────────
+   Colors are injected via CSS variables from the plan's palette.
+   Fallbacks use a soft Montessori-inspired earthy palette.
+   ─────────────────────────────────────────────────────────── */
+
+:root {
+  --color-primary: #7A9B76;
+  --color-secondary: #8B6F47;
+  --color-accent: #D4845B;
+  --color-background: #F5F1E8;
+  --color-text: #2D2D2D;
+  --color-text-light: #5A5A5A;
+  --color-text-muted: #8A8A8A;
+  --color-border: #D4CFC5;
+  --color-white: #FFFFFF;
+}
+
+/* ── Page Setup ──────────────────────────────────────────── */
+
+@page {
+  size: A4;
+  margin: 18mm 16mm 22mm 16mm;
+
+  @bottom-center {
+    content: counter(page);
+    font-family: "DejaVu Sans", system-ui, sans-serif;
+    font-size: 8pt;
+    color: var(--color-text-muted);
+  }
+}
+
+@page :first {
+  margin-top: 0;
+  margin-bottom: 0;
+
+  @bottom-center {
+    content: none;
+  }
+}
+
+/* ── Base Typography ─────────────────────────────────────── */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "DejaVu Sans", system-ui, -apple-system, sans-serif;
+  font-size: 10pt;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+h1, h2, h3, h4 {
+  font-family: Georgia, "DejaVu Serif", "Times New Roman", serif;
+  color: var(--color-primary);
+  line-height: 1.25;
+  page-break-after: avoid;
+}
+
+h1 { font-size: 26pt; }
+h2 { font-size: 16pt; margin-bottom: 6pt; }
+h3 { font-size: 12pt; margin-bottom: 4pt; }
+h4 { font-size: 10pt; margin-bottom: 3pt; color: var(--color-secondary); }
+
+p {
+  margin-bottom: 6pt;
+}
+
+/* ── Cover Page ──────────────────────────────────────────── */
+
+.cover-page {
+  page: cover;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 297mm;
+  text-align: center;
+  background: linear-gradient(160deg, var(--color-background) 0%, var(--color-white) 50%, var(--color-background) 100%);
+  page-break-after: always;
+}
+
+.cover-art {
+  max-width: 60%;
+  height: auto;
+  border-radius: 12pt;
+  margin-bottom: 16pt;
+}
+
+.cover-emoji {
+  font-size: 64pt;
+  margin-bottom: 12pt;
+}
+
+.cover-title {
+  font-size: 32pt;
+  color: var(--color-primary);
+  margin-bottom: 6pt;
+  letter-spacing: 0.5pt;
+}
+
+.cover-subtitle {
+  font-size: 14pt;
+  color: var(--color-secondary);
+  font-family: Georgia, "DejaVu Serif", serif;
+  font-style: italic;
+  margin-bottom: 24pt;
+}
+
+.cover-meta {
+  font-size: 10pt;
+  color: var(--color-text-light);
+  line-height: 1.8;
+}
+
+.cover-meta strong {
+  color: var(--color-text);
+}
+
+.cover-brand {
+  margin-top: 40pt;
+  padding-top: 16pt;
+  border-top: 1px solid var(--color-border);
+  font-size: 9pt;
+  color: var(--color-text-muted);
+  letter-spacing: 1.5pt;
+  text-transform: uppercase;
+}
+
+/* ── Section Headers ─────────────────────────────────────── */
+
+.section {
+  page-break-before: always;
+}
+
+.section-header {
+  background-color: var(--color-primary);
+  color: var(--color-white);
+  padding: 8pt 14pt;
+  margin-bottom: 14pt;
+  border-radius: 3pt;
+  font-family: Georgia, "DejaVu Serif", serif;
+  font-size: 15pt;
+  letter-spacing: 0.3pt;
+  page-break-after: avoid;
+}
+
+.section-intro {
+  font-style: italic;
+  color: var(--color-text-light);
+  margin-bottom: 12pt;
+  padding-bottom: 8pt;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* ── Weekly Overview ─────────────────────────────────────── */
+
+.overview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10pt;
+  margin-bottom: 14pt;
+}
+
+.overview-card {
+  flex: 1 1 45%;
+  background: var(--color-background);
+  border-left: 3pt solid var(--color-accent);
+  padding: 8pt 10pt;
+  border-radius: 0 3pt 3pt 0;
+}
+
+.overview-card h4 {
+  margin-bottom: 4pt;
+  font-size: 9pt;
+  text-transform: uppercase;
+  letter-spacing: 0.5pt;
+  color: var(--color-accent);
+}
+
+.overview-card p, .overview-card ul {
+  font-size: 9pt;
+  color: var(--color-text);
+}
+
+.objectives-list {
+  list-style: none;
+  padding: 0;
+}
+
+.objectives-list li {
+  padding: 4pt 0;
+  border-bottom: 1px dotted var(--color-border);
+  font-size: 9.5pt;
+}
+
+.objectives-list li:last-child {
+  border-bottom: none;
+}
+
+.domain-tag {
+  display: inline-block;
+  background: var(--color-primary);
+  color: var(--color-white);
+  font-size: 7pt;
+  padding: 1pt 5pt;
+  border-radius: 2pt;
+  text-transform: uppercase;
+  letter-spacing: 0.3pt;
+  margin-right: 4pt;
+  vertical-align: middle;
+}
+
+/* ── Daily Activities ────────────────────────────────────── */
+
+.day-block {
+  margin-bottom: 16pt;
+}
+
+.day-header {
+  background: var(--color-secondary);
+  color: var(--color-white);
+  padding: 5pt 10pt;
+  border-radius: 3pt;
+  margin-bottom: 8pt;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  page-break-after: avoid;
+}
+
+.day-header h3 {
+  color: var(--color-white);
+  margin: 0;
+  font-family: Georgia, "DejaVu Serif", serif;
+}
+
+.day-header .focus-domain {
+  font-size: 8pt;
+  background: rgba(255,255,255,0.25);
+  padding: 2pt 6pt;
+  border-radius: 2pt;
+}
+
+.activity-card {
+  background: var(--color-background);
+  border-radius: 3pt;
+  padding: 8pt 10pt;
+  margin-bottom: 8pt;
+  page-break-inside: avoid;
+}
+
+.activity-title {
+  font-size: 10.5pt;
+  font-weight: bold;
+  color: var(--color-primary);
+  margin-bottom: 2pt;
+}
+
+.activity-meta {
+  font-size: 8pt;
+  color: var(--color-text-muted);
+  margin-bottom: 4pt;
+}
+
+.activity-description {
+  font-size: 9.5pt;
+  margin-bottom: 6pt;
+  line-height: 1.45;
+}
+
+.activity-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8pt;
+  font-size: 8.5pt;
+}
+
+.detail-block {
+  flex: 1 1 45%;
+  min-width: 140pt;
+}
+
+.detail-block h4 {
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.4pt;
+  color: var(--color-accent);
+  margin-bottom: 2pt;
+  font-family: "DejaVu Sans", system-ui, sans-serif;
+}
+
+.detail-block ul {
+  list-style: disc;
+  padding-left: 12pt;
+  margin: 0;
+}
+
+.detail-block li {
+  margin-bottom: 1pt;
+  font-size: 8.5pt;
+}
+
+.safety-note {
+  background: #FFF3E0;
+  border-left: 3pt solid #E65100;
+  padding: 4pt 8pt;
+  margin-top: 6pt;
+  font-size: 8.5pt;
+  border-radius: 0 2pt 2pt 0;
+}
+
+.safety-note strong {
+  color: #E65100;
+}
+
+.adaptation-block {
+  margin-top: 6pt;
+}
+
+.adaptation-group {
+  font-size: 8.5pt;
+  margin-bottom: 3pt;
+}
+
+.adaptation-age {
+  font-weight: bold;
+  color: var(--color-secondary);
+}
+
+.reflection-prompts {
+  margin-top: 6pt;
+  padding-top: 4pt;
+  border-top: 1px dashed var(--color-border);
+  font-size: 8.5pt;
+  font-style: italic;
+  color: var(--color-text-light);
+}
+
+/* ── Circle Time ─────────────────────────────────────────── */
+
+.circle-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8pt;
+  margin-bottom: 12pt;
+}
+
+.circle-item {
+  flex: 1 1 22%;
+  text-align: center;
+  background: var(--color-background);
+  padding: 8pt 6pt;
+  border-radius: 3pt;
+}
+
+.circle-item .label {
+  font-size: 7.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.4pt;
+  color: var(--color-text-muted);
+  margin-bottom: 2pt;
+}
+
+.circle-item .value {
+  font-size: 14pt;
+  font-weight: bold;
+  color: var(--color-primary);
+}
+
+.song-block {
+  background: var(--color-background);
+  border-radius: 3pt;
+  padding: 8pt 10pt;
+  margin-bottom: 8pt;
+}
+
+.song-block h4 {
+  color: var(--color-primary);
+}
+
+.youtube-link {
+  display: inline-block;
+  font-family: "DejaVu Sans", system-ui, sans-serif;
+  font-size: 7.5pt;
+  font-weight: normal;
+  font-style: normal;
+  color: var(--color-accent);
+  text-decoration: none;
+  border: 1pt solid var(--color-accent);
+  padding: 1pt 5pt;
+  border-radius: 2pt;
+  margin-left: 6pt;
+  vertical-align: middle;
+  letter-spacing: 0.2pt;
+}
+
+.youtube-link:hover {
+  background: var(--color-accent);
+  color: var(--color-white);
+}
+
+.song-lyrics {
+  font-family: Georgia, "DejaVu Serif", serif;
+  font-style: italic;
+  font-size: 9pt;
+  line-height: 1.6;
+  white-space: pre-line;
+  color: var(--color-text-light);
+  margin-top: 4pt;
+  padding-left: 10pt;
+  border-left: 2pt solid var(--color-accent);
+}
+
+.yoga-list {
+  list-style: none;
+  padding: 0;
+}
+
+.yoga-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12pt;
+  background: var(--color-background);
+  border-radius: 3pt;
+  padding: 8pt 10pt;
+  margin-bottom: 10pt;
+  page-break-inside: avoid;
+}
+
+.yoga-image {
+  width: 120pt;
+  height: auto;
+  border-radius: 6pt;
+  flex-shrink: 0;
+}
+
+.yoga-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.yoga-item h4 {
+  color: var(--color-primary);
+  margin-bottom: 2pt;
+}
+
+.yoga-steps {
+  list-style: decimal;
+  padding-left: 16pt;
+  font-size: 8.5pt;
+  margin-top: 2pt;
+}
+
+.yoga-steps li {
+  margin-bottom: 1pt;
+}
+
+.creative-cues {
+  font-size: 8pt;
+  color: var(--color-accent);
+  font-style: italic;
+  margin-top: 3pt;
+}
+
+.read-aloud-block, .discussion-block {
+  background: var(--color-background);
+  padding: 8pt 10pt;
+  border-radius: 3pt;
+  margin-bottom: 8pt;
+}
+
+/* ── Materials Checklist ─────────────────────────────────── */
+
+.materials-grid {
+  column-count: 2;
+  column-gap: 16pt;
+}
+
+.material-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6pt;
+  margin-bottom: 4pt;
+  page-break-inside: avoid;
+  font-size: 9pt;
+}
+
+.checkbox {
+  display: inline-block;
+  width: 9pt;
+  height: 9pt;
+  border: 1.2pt solid var(--color-secondary);
+  border-radius: 1.5pt;
+  flex-shrink: 0;
+  margin-top: 1.5pt;
+}
+
+/* ── Newsletter ──────────────────────────────────────────── */
+
+.newsletter-section {
+  margin-bottom: 14pt;
+}
+
+.newsletter-section h3 {
+  margin-bottom: 6pt;
+}
+
+.newsletter-goals {
+  list-style: none;
+  padding: 0;
+}
+
+.newsletter-goals li {
+  padding: 3pt 0 3pt 12pt;
+  position: relative;
+  font-size: 9.5pt;
+}
+
+.newsletter-goals li::before {
+  content: "\2713";
+  position: absolute;
+  left: 0;
+  color: var(--color-primary);
+  font-weight: bold;
+}
+
+.home-connection {
+  background: var(--color-background);
+  border-left: 3pt solid var(--color-primary);
+  padding: 8pt 10pt;
+  border-radius: 0 3pt 3pt 0;
+  font-size: 9.5pt;
+  margin-bottom: 12pt;
+}
+
+.newsletter-text {
+  font-size: 9.5pt;
+  line-height: 1.55;
+  margin-bottom: 10pt;
+  white-space: pre-line;
+}
+
+/* ── Footer ──────────────────────────────────────────────── */
+
+.page-footer {
+  position: running(footer);
+  font-size: 8pt;
+  color: var(--color-text-muted);
+  text-align: center;
+  padding-top: 6pt;
+  border-top: 0.5pt solid var(--color-border);
+}

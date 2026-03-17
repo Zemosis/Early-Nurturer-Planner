@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ theme }} — Week {{ week_number }} Curriculum</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* Override palette colors from curriculum data */
+    :root {
+      {% if palette %}
+      --color-primary: {{ palette.primary | default('#7A9B76') }};
+      --color-secondary: {{ palette.secondary | default('#8B6F47') }};
+      --color-accent: {{ palette.accent | default('#D4845B') }};
+      --color-background: {{ palette.background | default('#F5F1E8') }};
+      {% endif %}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ════════════════════════════════════════════════════════
+       PAGE 1: COVER
+       ════════════════════════════════════════════════════════ -->
+  <div class="cover-page">
+    {% if cover_image_url %}
+    <img src="{{ cover_image_url }}" alt="{{ theme }} cover illustration" class="cover-art">
+    {% else %}
+    <div class="cover-emoji">{{ theme_emoji | default('') }}</div>
+    {% endif %}
+    <h1 class="cover-title">{{ theme }}</h1>
+    <p class="cover-subtitle">Weekly Curriculum Plan</p>
+
+    <div class="cover-meta">
+      <strong>Week {{ week_number }}</strong>
+      {% if week_range %} &bull; {{ week_range }}{% endif %}<br>
+      Age Group: 0–3 Years (Mixed Age)<br>
+      Generated {{ generated_date }}
+    </div>
+
+    <div class="cover-brand">Early Nurturer Planner</div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       PAGE 2: WEEKLY THEME OVERVIEW
+       ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-header">Weekly Theme Overview</div>
+
+    <p class="section-intro">
+      This week we explore <strong>"{{ theme }}"</strong> across multiple
+      developmental domains, weaving thematic connections into every activity,
+      circle-time element, and home connection.
+    </p>
+
+    <div class="overview-grid">
+      <div class="overview-card">
+        <h4>Developmental Domains</h4>
+        <p>
+          {% for domain in domains %}
+            <span class="domain-tag">{{ domain }}</span>
+          {% endfor %}
+        </p>
+      </div>
+
+      <div class="overview-card">
+        <h4>Circle Time Focus</h4>
+        <p>
+          {% if circle_time %}
+          Letter: <strong>{{ circle_time.letter }}</strong> &bull;
+          Color: <strong>{{ circle_time.color }}</strong> &bull;
+          Shape: <strong>{{ circle_time.shape }}</strong> &bull;
+          Counting to: <strong>{{ circle_time.counting_to }}</strong>
+          {% endif %}
+        </p>
+      </div>
+    </div>
+
+    {% if objectives %}
+    <h3>Weekly Objectives</h3>
+    <ul class="objectives-list">
+      {% for obj in objectives %}
+      <li>
+        <span class="domain-tag">{{ obj.domain }}</span>
+        {{ obj.goal }}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       PAGES 3+: DAILY ACTIVITIES (Mon–Fri)
+       ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-header">Daily Activities Schedule</div>
+
+    {% for day_plan in daily_plans %}
+    <div class="day-block">
+      <div class="day-header">
+        <h3>{{ day_plan.day }}</h3>
+        <span class="focus-domain">{{ day_plan.focus_domain }}</span>
+      </div>
+
+      {% for activity in day_plan.activities %}
+      <div class="activity-card">
+        <div class="activity-title">{{ activity.title }}</div>
+        <div class="activity-meta">
+          {{ activity.domain }} &bull; {{ activity.duration }} minutes
+          {% if activity.theme_connection %}
+          &bull; <em>{{ activity.theme_connection }}</em>
+          {% endif %}
+        </div>
+
+        <p class="activity-description">{{ activity.description }}</p>
+
+        <div class="activity-details">
+          {% if activity.materials %}
+          <div class="detail-block">
+            <h4>Materials</h4>
+            <ul>
+              {% for material in activity.materials %}
+              <li>{{ material }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+
+          {% if activity.adaptations %}
+          <div class="detail-block">
+            <h4>Age Adaptations</h4>
+            <div class="adaptation-block">
+              {% for adapt in activity.adaptations %}
+              <div class="adaptation-group">
+                <span class="adaptation-age">{{ adapt.age_group }}:</span>
+                {{ adapt.description }}
+                {% if adapt.modifications %}
+                <ul>
+                  {% for mod in adapt.modifications %}
+                  <li>{{ mod }}</li>
+                  {% endfor %}
+                </ul>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+
+        {% if activity.safety_notes %}
+        <div class="safety-note">
+          <strong>Safety:</strong> {{ activity.safety_notes }}
+        </div>
+        {% endif %}
+
+        {% if activity.reflection_prompts %}
+        <div class="reflection-prompts">
+          <strong>Reflection:</strong>
+          {% for prompt in activity.reflection_prompts %}
+            {{ prompt }}{% if not loop.last %} &bull; {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       CIRCLE TIME OVERVIEW
+       ════════════════════════════════════════════════════════ -->
+  {% if circle_time %}
+  <div class="section">
+    <div class="section-header">Circle Time Overview</div>
+
+    <div class="circle-grid">
+      <div class="circle-item">
+        <div class="label">Letter</div>
+        <div class="value">{{ circle_time.letter }}</div>
+      </div>
+      <div class="circle-item">
+        <div class="label">Color</div>
+        <div class="value">{{ circle_time.color }}</div>
+      </div>
+      <div class="circle-item">
+        <div class="label">Shape</div>
+        <div class="value">{{ circle_time.shape }}</div>
+      </div>
+      <div class="circle-item">
+        <div class="label">Counting To</div>
+        <div class="value">{{ circle_time.counting_to }}</div>
+      </div>
+    </div>
+
+    <!-- Songs -->
+    {% if circle_time.greeting_song %}
+    <div class="song-block">
+      <h4>Greeting Song: {{ circle_time.greeting_song.title }}
+        {% if circle_time.greeting_song.youtube_url %}
+        <a href="{{ circle_time.greeting_song.youtube_url }}" class="youtube-link">▶ Watch on YouTube</a>
+        {% endif %}
+      </h4>
+      {% if circle_time.greeting_song.duration %}
+      <div class="activity-meta">Duration: {{ circle_time.greeting_song.duration }}</div>
+      {% endif %}
+      <div class="song-lyrics">{{ circle_time.greeting_song.script }}</div>
+    </div>
+    {% endif %}
+
+    {% if circle_time.goodbye_song %}
+    <div class="song-block">
+      <h4>Goodbye Song: {{ circle_time.goodbye_song.title }}
+        {% if circle_time.goodbye_song.youtube_url %}
+        <a href="{{ circle_time.goodbye_song.youtube_url }}" class="youtube-link">▶ Watch on YouTube</a>
+        {% endif %}
+      </h4>
+      {% if circle_time.goodbye_song.duration %}
+      <div class="activity-meta">Duration: {{ circle_time.goodbye_song.duration }}</div>
+      {% endif %}
+      <div class="song-lyrics">{{ circle_time.goodbye_song.script }}</div>
+    </div>
+    {% endif %}
+
+    <!-- Yoga Poses -->
+    {% if circle_time.yoga_poses %}
+    <h3>Yoga &amp; Mindful Movement</h3>
+    <ul class="yoga-list">
+      {% for pose in circle_time.yoga_poses %}
+      <li class="yoga-item">
+        {% if pose.image_url %}
+        <img src="{{ pose.image_url }}" alt="{{ pose.name }}" class="yoga-image">
+        {% endif %}
+        <div class="yoga-content">
+          <h4>{{ pose.name }}</h4>
+          {% if pose.how_to %}
+          <ol class="yoga-steps">
+            {% for step in pose.how_to %}
+            <li>{{ step }}</li>
+            {% endfor %}
+          </ol>
+          {% endif %}
+          {% if pose.creative_cues %}
+          <div class="creative-cues">
+            {{ pose.creative_cues | join(' &bull; ') }}
+          </div>
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    <!-- Read-Aloud -->
+    {% if circle_time.read_aloud %}
+    <div class="read-aloud-block">
+      <h4>Read-Aloud Recommendation</h4>
+      <p>{{ circle_time.read_aloud }}</p>
+    </div>
+    {% endif %}
+
+    <!-- Discussion Prompt -->
+    {% if circle_time.discussion_prompt %}
+    <div class="discussion-block">
+      <h4>Discussion Prompt</h4>
+      <p><em>{{ circle_time.discussion_prompt }}</em></p>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- ════════════════════════════════════════════════════════
+       MATERIALS CHECKLIST
+       ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-header">Materials &amp; Supplies Checklist</div>
+    <p class="section-intro">
+      All materials needed for this week's activities, collected and deduplicated
+      for easy prep.
+    </p>
+
+    <div class="materials-grid">
+      {% for material in all_materials %}
+      <div class="material-item">
+        <span class="checkbox"></span>
+        <span>{{ material }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       PARENT NEWSLETTER
+       ════════════════════════════════════════════════════════ -->
+  {% if newsletter %}
+  <div class="section">
+    <div class="section-header">Parent Newsletter</div>
+
+    <div class="newsletter-section">
+      <h3>Welcome</h3>
+      <p class="newsletter-text">{{ newsletter.welcome_message }}</p>
+    </div>
+
+    {% if newsletter.learning_goals %}
+    <div class="newsletter-section">
+      <h3>This Week's Learning Goals</h3>
+      <ul class="newsletter-goals">
+        {% for goal in newsletter.learning_goals %}
+        <li>{{ goal }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if newsletter.home_connection %}
+    <div class="newsletter-section">
+      <h3>Home Connection</h3>
+      <div class="home-connection">
+        {{ newsletter.home_connection }}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if newsletter.warm_version %}
+    <div class="newsletter-section">
+      <h3>Family-Friendly Version</h3>
+      <p class="newsletter-text">{{ newsletter.warm_version }}</p>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- ════════════════════════════════════════════════════════
+       DOCUMENTATION CHECKLIST
+       ════════════════════════════════════════════════════════ -->
+  <div class="section">
+    <div class="section-header">Documentation &amp; Observation Checklist</div>
+
+    <h3>Developmental Observations</h3>
+    <div class="materials-grid" style="margin-bottom: 14pt;">
+      {% set observations = [
+        'Physical development (gross & fine motor)',
+        'Cognitive growth (problem-solving, exploration)',
+        'Language development (communication, vocabulary)',
+        'Social-emotional skills (interaction, regulation)',
+        'Creative expression (art, music, movement)',
+        'Self-help skills (independence, routines)'
+      ] %}
+      {% for obs in observations %}
+      <div class="material-item">
+        <span class="checkbox"></span>
+        <span>{{ obs }}</span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <h3>Photo Documentation</h3>
+    <div class="materials-grid">
+      {% set photo_tasks = [
+        'Individual child engagement',
+        'Group activities',
+        'Completed art projects',
+        'Circle time participation',
+        'Outdoor exploration',
+        'Special moments'
+      ] %}
+      {% for task in photo_tasks %}
+      <div class="material-item">
+        <span class="checkbox"></span>
+        <span>{{ task }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</body>
+</html>
