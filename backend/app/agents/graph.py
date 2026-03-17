@@ -20,6 +20,7 @@ import logging
 import uuid
 
 from langgraph.graph import END, START, StateGraph
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.agents.architect import curriculum_architect
@@ -88,9 +89,10 @@ async def fetch_context_node(state: PlannerState) -> dict:
 async def save_plan_node(state: PlannerState) -> dict:
     """Persist the final plan, critique history, and reasoning log to Postgres.
 
-    - Saves personalized_plan → weekly_plans table
+    - Saves personalized_plan → weekly_plans table (upsert on year/month/week_of_month)
     - Saves audit_result → critique_history table
     - Logs pipeline completion → agent_reasoning_logs table
+    - Returns saved_plan_id so the API can pass it to the frontend
     """
     personalized_plan = state.get("personalized_plan")
     draft_plan = state.get("draft_plan")
@@ -99,8 +101,17 @@ async def save_plan_node(state: PlannerState) -> dict:
     thread_id = state.get("thread_id", str(uuid.uuid4()))
     iteration_count = state.get("iteration_count", 0)
 
+    # Calendar fields from state (set by the planner endpoint)
+    year = state.get("year", 2026)
+    month = state.get("month", 1)
+    week_of_month = state.get("week_of_month", 1)
+
     # Use personalized_plan if available, fall back to draft_plan
     final_plan = personalized_plan or draft_plan
+
+    logger.info("save_plan_node: personalized=%s, draft=%s, user=%s, year=%s, month=%s, wom=%s",
+                personalized_plan is not None, draft_plan is not None,
+                user_id_str, year, month, week_of_month)
 
     if not final_plan:
         logger.warning("Save: no plan available (personalized=%s, draft=%s)",
@@ -120,12 +131,17 @@ async def save_plan_node(state: PlannerState) -> dict:
 
     try:
         async with async_session_factory() as session:
-            # ── 1. Upsert weekly plan (one plan per user per week) ──
-            week_num = final_plan.get("week_number", 1)
+            # ── 1. Upsert weekly plan (one plan per user per calendar week) ──
+            week_num = state.get("week_number", final_plan.get("week_number", 1))
+            plan_id = uuid.uuid4()
             stmt = pg_insert(WeeklyPlan).values(
+                id=plan_id,
                 user_id=user_uid,
                 week_number=week_num,
-                week_range=final_plan.get("week_range", ""),
+                year=year,
+                month=month,
+                week_of_month=week_of_month,
+                week_range=final_plan.get("week_range", state.get("week_range", "")),
                 theme=final_plan.get("theme", ""),
                 theme_emoji=final_plan.get("theme_emoji"),
                 palette=final_plan.get("palette"),
@@ -137,8 +153,9 @@ async def save_plan_node(state: PlannerState) -> dict:
                 is_generated=True,
             )
             stmt = stmt.on_conflict_do_update(
-                constraint="uq_weekly_plans_user_week",
+                constraint="uq_weekly_plans_user_year_month_week",
                 set_={
+                    "week_number": stmt.excluded.week_number,
                     "week_range": stmt.excluded.week_range,
                     "theme": stmt.excluded.theme,
                     "theme_emoji": stmt.excluded.theme_emoji,
@@ -151,8 +168,20 @@ async def save_plan_node(state: PlannerState) -> dict:
                     "is_generated": stmt.excluded.is_generated,
                 },
             )
-            await session.execute(stmt)
-            logger.info("Upsert: saved plan for week %s", week_num)
+            result = await session.execute(stmt)
+            logger.info("Upsert: saved plan for %d/%d week %d (global #%d)",
+                        year, month, week_of_month, week_num)
+
+            # Fetch the actual ID (could be existing row on conflict)
+            row = await session.execute(
+                select(WeeklyPlan.id).where(
+                    WeeklyPlan.user_id == user_uid,
+                    WeeklyPlan.year == year,
+                    WeeklyPlan.month == month,
+                    WeeklyPlan.week_of_month == week_of_month,
+                )
+            )
+            saved_id = row.scalar()
 
             # ── 2. Save critique history ──────────────────────
             if audit_result:
@@ -178,16 +207,20 @@ async def save_plan_node(state: PlannerState) -> dict:
                     f"Personalized: {personalized_plan is not None}."
                 ),
                 input_summary=f"thread={thread_id}, user={user_id_str}",
-                output_summary=f"Saved week {final_plan.get('week_number')} "
+                output_summary=f"Saved week {week_num} "
                                f"plan for theme '{final_plan.get('theme')}'.",
             )
             session.add(reasoning_log)
 
             await session.commit()
 
-        return {"error": None}
+        return {
+            "error": None,
+            "saved_plan_id": str(saved_id) if saved_id else str(plan_id),
+        }
 
     except Exception as e:
+        logger.exception("save_plan_node FAILED: %s", e)
         return {"error": f"Save failed: {e}"}
 
 

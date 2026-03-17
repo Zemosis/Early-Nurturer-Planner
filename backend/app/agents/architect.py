@@ -53,7 +53,7 @@ Requirements:
 - Age adaptations (0-12m, 12-24m, 24-36m) for every activity.
 
 Structure:
-- Exactly 5 daily plans (Mon–Fri), each with a focus domain and 1–3 activities.
+- Exactly 5 daily plans (Mon–Fri), each with a focus domain and exactly 1 activity.
 - Each activity: safety_notes (specific, not vague) + at least one adaptation.
 - Circle time: greeting song, goodbye song, 2–3 yoga poses, read-aloud, \
   discussion prompt.
@@ -114,10 +114,10 @@ JSON SCHEMA (follow exactly — all fields required unless noted):
             {"age_group":"24-36m","description":"<string>","modifications":["<string>",...]}
           ],
           "reflection_prompts": ["<string>", ...]
-        }
+        }  // IMPORTANT: exactly 1 activity per day
       ]
     },
-    ... (repeat for Tuesday, Wednesday, Thursday, Friday)
+    ... (repeat for Tuesday, Wednesday, Thursday, Friday — exactly 1 activity each)
   ],
   "newsletter": {
     "welcome_message": "<string>",

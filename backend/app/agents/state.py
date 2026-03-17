@@ -21,8 +21,11 @@ class PlannerState(TypedDict, total=False):
     user_id: str
     thread_id: str                # unique ID for this graph run (uuid4)
     selected_theme: dict          # ThemeSchema serialised as dict
-    week_number: int
+    week_number: int              # global cumulative week number
     week_range: str               # e.g. "3/10 - 3/14"
+    year: int                     # calendar year e.g. 2026
+    month: int                    # calendar month 1-12
+    week_of_month: int            # week within month (1-5)
 
     # ── Context (populated by the fetch_context node) ─────────
     student_context: str          # from fetch_student_context()
@@ -40,3 +43,6 @@ class PlannerState(TypedDict, total=False):
     # ── Control flow ──────────────────────────────────────────
     iteration_count: int          # incremented each Architect pass (max 3)
     error: str | None             # set on Gemini / DB failures
+
+    # ── Save output ─────────────────────────────────────────
+    saved_plan_id: str | None     # UUID of the saved WeeklyPlan row

@@ -6,7 +6,7 @@
  */
 
 import { motion, AnimatePresence } from "motion/react";
-import { Check, Sparkles, Eye } from "lucide-react";
+import { Check, Sparkles, Eye, Bookmark } from "lucide-react";
 import { useState } from "react";
 import { ThemeDetail } from "../utils/themeData";
 import { useTheme } from "../contexts/ThemeContext";
@@ -16,6 +16,8 @@ interface ThemeSelectionGridProps {
   selectedThemeId?: string;
   onSelectTheme: (themeId: string) => void;
   enableHoverPreview?: boolean;
+  keepMode?: boolean;
+  keepSet?: Set<string>;
 }
 
 export function ThemeSelectionGrid({
@@ -23,6 +25,8 @@ export function ThemeSelectionGrid({
   selectedThemeId,
   onSelectTheme,
   enableHoverPreview = true,
+  keepMode = false,
+  keepSet,
 }: ThemeSelectionGridProps) {
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const { previewTheme } = useTheme();
@@ -73,6 +77,7 @@ export function ThemeSelectionGrid({
         {themes.map((theme, index) => {
           const isSelected = theme.id === selectedThemeId;
           const isPreviewed = theme.id === previewThemeId;
+          const isKept = keepMode && keepSet?.has(theme.id);
 
           return (
             <motion.button
@@ -87,21 +92,40 @@ export function ThemeSelectionGrid({
                 relative rounded-2xl border-2 p-5 text-left transition-all duration-300
                 hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]
                 ${
-                  isSelected
+                  isKept
                     ? "ring-4 ring-offset-2 shadow-xl"
-                    : "hover:border-opacity-60"
+                    : isSelected
+                      ? "ring-4 ring-offset-2 shadow-xl"
+                      : "hover:border-opacity-60"
                 }
               `}
               style={{
                 backgroundColor: theme.palette.hex.background,
-                borderColor: isSelected
-                  ? theme.palette.hex.primary
-                  : theme.palette.hex.primary + "40",
-                ringColor: isSelected ? theme.palette.hex.primary + "30" : "transparent",
+                borderColor: isKept
+                  ? theme.palette.hex.accent
+                  : isSelected
+                    ? theme.palette.hex.primary
+                    : theme.palette.hex.primary + "40",
+                ringColor: isKept
+                  ? theme.palette.hex.accent + "30"
+                  : isSelected
+                    ? theme.palette.hex.primary + "30"
+                    : "transparent",
               }}
             >
-              {/* Selected Indicator */}
-              {isSelected && (
+              {/* Selected / Kept Indicator */}
+              {isKept && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: "spring", stiffness: 200 }}
+                  className="absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center text-white shadow-lg"
+                  style={{ backgroundColor: theme.palette.hex.accent }}
+                >
+                  <Bookmark className="w-4 h-4" />
+                </motion.div>
+              )}
+              {!keepMode && isSelected && (
                 <motion.div
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}

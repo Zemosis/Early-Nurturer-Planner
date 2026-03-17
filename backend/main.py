@@ -17,6 +17,7 @@ logging.basicConfig(
 
 from app.api.routers.themes import router as themes_router
 from app.api.routers.planner import router as planner_router
+from app.api.routers.theme_pool import router as theme_pool_router
 
 app = FastAPI(
     title="Early Nurturer API",
@@ -41,6 +42,7 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────
 app.include_router(themes_router)
 app.include_router(planner_router)
+app.include_router(theme_pool_router)
 
 
 # ── Health check ──────────────────────────────────────────────

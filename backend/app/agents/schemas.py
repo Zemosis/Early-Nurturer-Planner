@@ -486,8 +486,8 @@ class DailyPlanSchema(BaseModel):
     )
     activities: list[ActivitySchema] = Field(
         ...,
-        description="1–4 activities scheduled for this day, each targeting "
-                    "the focus domain or supporting domains.",
+        description="Exactly 1 activity scheduled for this day, targeting "
+                    "the focus domain.",
     )
 
 
@@ -578,7 +578,7 @@ class WeekPlanSchema(BaseModel):
     daily_plans: list[DailyPlanSchema] = Field(
         ...,
         description="Exactly 5 daily plans (Monday through Friday), each with "
-                    "a focus domain and 1–4 activities.",
+                    "a focus domain and exactly 1 activity.",
     )
     newsletter: NewsletterSchema = Field(
         ...,

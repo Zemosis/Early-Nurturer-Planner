@@ -128,6 +128,39 @@ class Student(Base):
     )
 
 
+class ThemePool(Base):
+    """Persistent pool of pre-generated theme options per user.
+
+    Each user always has up to 5 active (is_used=False) themes.
+    When a theme is selected for plan generation it is marked is_used=True
+    and a replacement is generated to keep the pool at 5.
+    """
+
+    __tablename__ = "theme_pool"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    theme_data: Mapped[dict] = mapped_column(
+        JSONB, nullable=False,
+        doc="Full ThemeSchema dict as returned by the AI theme generator."
+    )
+    is_used: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False,
+        doc="True once the user has generated a plan with this theme."
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_theme_pool_user_active", "user_id", "is_used"),
+    )
+
+
 class WeeklyPlan(Base):
     """Generated weekly curriculum plan.
 
@@ -144,7 +177,22 @@ class WeeklyPlan(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    week_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    week_number: Mapped[int] = mapped_column(
+        Integer, nullable=False,
+        doc="Cumulative global week number across all user plans (auto-incremented)."
+    )
+    year: Mapped[int] = mapped_column(
+        Integer, nullable=False,
+        doc="Calendar year, e.g. 2026."
+    )
+    month: Mapped[int] = mapped_column(
+        Integer, nullable=False,
+        doc="Calendar month 1-12."
+    )
+    week_of_month: Mapped[int] = mapped_column(
+        Integer, nullable=False,
+        doc="Week number within the month (1-5), resets each month."
+    )
     week_range: Mapped[str] = mapped_column(String(50), nullable=False, doc="e.g. '2/23 - 2/27'")
     theme: Mapped[str] = mapped_column(String(255), nullable=False)
     theme_emoji: Mapped[str | None] = mapped_column(String(10))
@@ -181,8 +229,9 @@ class WeeklyPlan(Base):
     user: Mapped["User"] = relationship(back_populates="weekly_plans")
 
     __table_args__ = (
-        UniqueConstraint("user_id", "week_number", name="uq_weekly_plans_user_week"),
-        Index("ix_weekly_plans_user_week", "user_id", "week_number"),
+        UniqueConstraint("user_id", "year", "month", "week_of_month",
+                         name="uq_weekly_plans_user_year_month_week"),
+        Index("ix_weekly_plans_user_created", "user_id", "created_at"),
     )
 
 

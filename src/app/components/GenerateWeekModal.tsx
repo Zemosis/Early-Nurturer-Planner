@@ -5,108 +5,126 @@ import { useTheme } from "../contexts/ThemeContext";
 import { ThemeDetail } from "../utils/themeData";
 import { ThemeSelectionGrid } from "./ThemeSelectionGrid";
 import { usePlanner } from "../contexts/PlannerContext";
-import { generateThemes, generatePlan } from "../utils/api";
+import { fetchThemePool, refreshThemePool, generatePlan, ThemePoolItem } from "../utils/api";
 import { transformApiThemeToThemeDetail, transformApiPlanToWeekPlan } from "../utils/apiTransformers";
 
 interface GenerateWeekModalProps {
-  onComplete: () => void;
+  onComplete: (planId?: string) => void;
 }
 
 export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
   const [stage, setStage] = useState<
-    "generating-themes" | "selection" | "generating-plan" | "error"
-  >("generating-themes");
+    "loading-pool" | "selection" | "generating-plan" | "error"
+  >("loading-pool");
   const { setThemeFromDetail, registerDynamicThemes } = useTheme();
-  const { setCurrentPlan, setError: setPlannerError } = usePlanner();
+  const { setCurrentPlan, setCurrentPlanId, setError: setPlannerError, themePool, setThemePool } = usePlanner();
   const [themeOptions, setThemeOptions] = useState<ThemeDetail[]>([]);
   const [selectedThemeId, setSelectedThemeId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>("");
-  const [isShuffling, setIsShuffling] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [keepMode, setKeepMode] = useState(false);
+  const [keepSet, setKeepSet] = useState<Set<string>>(new Set());
   const abortRef = useRef(false);
 
-  // Raw API themes kept for sending back to planner
-  const [rawApiThemes, setRawApiThemes] = useState<Record<string, unknown>[]>([]);
+  // Map from ThemeDetail.id → pool item UUID for sending to backend
+  const [poolIdMap, setPoolIdMap] = useState<Map<string, string>>(new Map());
 
-  const fetchThemes = async () => {
+  const applyPoolToState = (pool: ThemePoolItem[]) => {
+    setThemePool(pool);
+
+    const idMap = new Map<string, string>();
+    const transformed = pool.map((item) => {
+      const detail = transformApiThemeToThemeDetail(item.theme_data);
+      idMap.set(detail.id, item.id);
+      return detail;
+    });
+    setPoolIdMap(idMap);
+    setThemeOptions(transformed);
+    registerDynamicThemes(transformed);
+
+    if (transformed.length > 0) {
+      setSelectedThemeId(transformed[0].id);
+      setThemeFromDetail(transformed[0]);
+    }
+  };
+
+  const loadPool = async () => {
     try {
-      const data = await generateThemes();
+      const pool = await fetchThemePool();
       if (abortRef.current) return;
-
-      // data is an array of theme objects directly
-      const apiThemes = Array.isArray(data) ? data : (data as any).themes ?? data;
-      setRawApiThemes(apiThemes as Record<string, unknown>[]);
-
-      const transformed = (apiThemes as Record<string, unknown>[]).map(transformApiThemeToThemeDetail);
-      setThemeOptions(transformed);
-      registerDynamicThemes(transformed);
-
-      if (transformed.length > 0) {
-        setSelectedThemeId(transformed[0].id);
-        setThemeFromDetail(transformed[0]);
-      }
+      applyPoolToState(pool);
       setStage("selection");
     } catch (err: any) {
       if (abortRef.current) return;
-      setErrorMsg(err.message ?? "Failed to generate themes");
+      setErrorMsg(err.message ?? "Failed to load themes");
       setStage("error");
     }
   };
 
   useEffect(() => {
     abortRef.current = false;
-    fetchThemes();
+    loadPool();
     return () => { abortRef.current = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSelectTheme = (themeId: string) => {
+    if (keepMode) {
+      // In keep mode, toggle the keep status
+      setKeepSet((prev) => {
+        const next = new Set(prev);
+        if (next.has(themeId)) next.delete(themeId);
+        else next.add(themeId);
+        return next;
+      });
+      return;
+    }
     setSelectedThemeId(themeId);
     const detail = themeOptions.find((t) => t.id === themeId);
     if (detail) setThemeFromDetail(detail);
   };
 
-  const handleShuffle = async () => {
-    setIsShuffling(true);
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
     try {
-      const data = await generateThemes();
-      const apiThemes = Array.isArray(data) ? data : (data as any).themes ?? data;
-      setRawApiThemes(apiThemes as Record<string, unknown>[]);
+      // Convert kept ThemeDetail IDs → pool UUIDs
+      const keepPoolIds = Array.from(keepSet)
+        .map((detailId) => poolIdMap.get(detailId))
+        .filter(Boolean) as string[];
 
-      const transformed = (apiThemes as Record<string, unknown>[]).map(transformApiThemeToThemeDetail);
-      setThemeOptions(transformed);
-      registerDynamicThemes(transformed);
-
-      if (transformed.length > 0) {
-        setSelectedThemeId(transformed[0].id);
-        setThemeFromDetail(transformed[0]);
-      }
+      const pool = await refreshThemePool(keepPoolIds);
+      applyPoolToState(pool);
+      setKeepMode(false);
+      setKeepSet(new Set());
     } catch (err: any) {
-      setErrorMsg(err.message ?? "Failed to generate themes");
+      setErrorMsg(err.message ?? "Failed to refresh themes");
       setStage("error");
     } finally {
-      setIsShuffling(false);
+      setIsRefreshing(false);
     }
   };
 
   const handleContinue = async () => {
     if (!selectedThemeId) return;
 
-    // Find the raw API theme to send to the planner
+    // Find the raw theme data and pool UUID
     const idx = themeOptions.findIndex((t) => t.id === selectedThemeId);
-    const rawTheme = rawApiThemes[idx] ?? {};
+    const poolItem = themePool[idx];
+    const rawTheme = poolItem?.theme_data ?? {};
+    const poolUuid = poolIdMap.get(selectedThemeId);
 
     setStage("generating-plan");
     try {
       const result = await generatePlan({
         selectedTheme: rawTheme,
-        weekNumber: 1,
-        weekRange: "",
+        themePoolId: poolUuid,
       });
 
       const plan = transformApiPlanToWeekPlan(result.plan);
       setCurrentPlan(plan);
+      setCurrentPlanId(result.plan_id ?? null);
       setPlannerError(null);
-      onComplete();
+      onComplete(result.plan_id ?? undefined);
     } catch (err: any) {
       setErrorMsg(err.message ?? "Failed to generate plan");
       setPlannerError(err.message ?? "Failed to generate plan");
@@ -116,17 +134,17 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
 
   const handleRetry = () => {
     setErrorMsg("");
-    setStage("generating-themes");
-    fetchThemes();
+    setStage("loading-pool");
+    loadPool();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <AnimatePresence mode="wait">
-        {/* ── Generating Themes spinner ── */}
-        {stage === "generating-themes" && (
+        {/* ── Loading Pool spinner ── */}
+        {stage === "loading-pool" && (
           <motion.div
-            key="generating-themes"
+            key="loading-pool"
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
@@ -145,10 +163,10 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
                 />
               </motion.div>
               <h3 className="text-xl font-medium text-foreground mb-2">
-                Generating theme options…
+                Loading your theme pool…
               </h3>
               <p className="text-sm text-muted-foreground">
-                AI is crafting personalised themes for your classroom
+                Fetching personalised themes for your classroom
               </p>
             </div>
           </motion.div>
@@ -230,31 +248,58 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-medium text-foreground mb-2">
-                    Choose Your Weekly Theme
+                    {keepMode ? "Keep Your Favorites" : "Choose Your Weekly Theme"}
                   </h2>
                   <p className="text-sm text-muted-foreground">
-                    Select a theme to shape this week's activities, songs, and materials
+                    {keepMode
+                      ? "Click themes you want to keep, then hit Refresh to replace the rest"
+                      : "Select a theme to shape this week's activities, songs, and materials"}
                   </p>
                 </div>
-                <button
-                  onClick={handleShuffle}
-                  disabled={isShuffling}
-                  className="flex items-center gap-2 px-4 py-2 bg-muted/50 hover:bg-muted rounded-xl transition-all hover:shadow-md disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-4 h-4 text-foreground ${isShuffling ? "animate-spin" : ""}`} />
-                  <span className="text-sm font-medium text-foreground hidden sm:inline">
-                    {isShuffling ? "Generating…" : "Shuffle Themes"}
-                  </span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {keepMode ? (
+                    <>
+                      <button
+                        onClick={() => { setKeepMode(false); setKeepSet(new Set()); }}
+                        className="flex items-center gap-2 px-4 py-2 bg-muted/50 hover:bg-muted rounded-xl transition-all text-sm font-medium text-foreground"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleRefresh}
+                        disabled={isRefreshing}
+                        className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl transition-all disabled:opacity-50 text-sm font-medium"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
+                        {isRefreshing ? "Refreshing…" : `Refresh (keep ${keepSet.size})`}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setKeepMode(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-muted/50 hover:bg-muted rounded-xl transition-all hover:shadow-md"
+                    >
+                      <RefreshCw className="w-4 h-4 text-foreground" />
+                      <span className="text-sm font-medium text-foreground hidden sm:inline">
+                        Don't like these?
+                      </span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* Theme Selection Grid */}
-            <div className="p-6">
+            <div className="p-6 relative">
+              {keepMode && (
+                <div className="absolute inset-0 z-10 pointer-events-none" />
+              )}
               <ThemeSelectionGrid
                 themes={themeOptions}
-                selectedThemeId={selectedThemeId || undefined}
+                selectedThemeId={keepMode ? undefined : (selectedThemeId || undefined)}
                 onSelectTheme={handleSelectTheme}
+                keepMode={keepMode}
+                keepSet={keepSet}
               />
             </div>
 
@@ -262,27 +307,31 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
             <div className="sticky bottom-0 bg-white border-t border-border p-6 rounded-b-3xl">
               <div className="flex items-center justify-between gap-4">
                 <p className="text-sm text-muted-foreground">
-                  {selectedThemeId && (
+                  {keepMode ? (
+                    <span>{keepSet.size} theme{keepSet.size !== 1 ? "s" : ""} kept — {themeOptions.length - keepSet.size} will be replaced</span>
+                  ) : selectedThemeId ? (
                     <>
                       <strong className="text-foreground">Selected:</strong>{" "}
                       {themeOptions.find((t) => t.id === selectedThemeId)?.name}
                     </>
-                  )}
+                  ) : null}
                 </p>
-                <button
-                  onClick={handleContinue}
-                  disabled={!selectedThemeId}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl font-medium transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-white"
-                  style={{
-                    backgroundColor: selectedThemeId
-                      ? themeOptions.find((t) => t.id === selectedThemeId)?.palette.hex
-                          .primary
-                      : "#ccc",
-                  }}
-                >
-                  <span>Generate Week Plan</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
+                {!keepMode && (
+                  <button
+                    onClick={handleContinue}
+                    disabled={!selectedThemeId}
+                    className="flex items-center gap-2 px-6 py-3 rounded-xl font-medium transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed text-white"
+                    style={{
+                      backgroundColor: selectedThemeId
+                        ? themeOptions.find((t) => t.id === selectedThemeId)?.palette.hex
+                            .primary
+                        : "#ccc",
+                    }}
+                  >
+                    <span>Generate Week Plan</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
           </motion.div>

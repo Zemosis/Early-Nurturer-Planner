@@ -10,15 +10,16 @@ safety-audited weekly curriculum plan.
 import io
 import logging
 import uuid
+from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.agents.graph import build_planner_graph
 from app.db.database import async_session_factory
-from app.db.models import WeeklyPlan
+from app.db.models import WeeklyPlan, ThemePool
 from app.services.image_service import get_or_generate_cover_image
 from app.services.pdf_service import generate_weekly_pdf
 
@@ -35,8 +36,29 @@ class GeneratePlanRequest(BaseModel):
 
     user_id: str
     selected_theme: dict
-    week_number: int = 1
-    week_range: str = ""
+    theme_pool_id: str | None = None  # UUID of the theme in the pool (to mark as used)
+
+
+# ── Helpers ──────────────────────────────────────────────────
+
+
+def _compute_week_info(today: date | None = None) -> dict:
+    """Compute calendar-based week info from a date.
+
+    Returns dict with year, month, week_of_month, week_range.
+    """
+    if today is None:
+        today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    friday = monday + timedelta(days=4)
+    week_of_month = (monday.day - 1) // 7 + 1
+    week_range = f"{monday.month}/{monday.day} - {friday.month}/{friday.day}"
+    return {
+        "year": monday.year,
+        "month": monday.month,
+        "week_of_month": week_of_month,
+        "week_range": week_range,
+    }
 
 
 # ── Endpoints ─────────────────────────────────────────────────
@@ -46,12 +68,45 @@ class GeneratePlanRequest(BaseModel):
 async def generate_plan(request: GeneratePlanRequest):
     """Trigger the full Architect → Auditor → Personalizer pipeline.
 
-    Compiles the LangGraph, invokes it with the provided theme and
-    educator context, and returns the personalised weekly plan.
+    Auto-computes calendar week info from today's date.
+    Marks the selected theme as used in the pool (if theme_pool_id given).
 
     Returns:
-        A dict with status and the personalised plan.
+        A dict with status, the personalised plan, and the saved plan_id.
     """
+    try:
+        user_uid = uuid.UUID(request.user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    # Compute calendar week info
+    week_info = _compute_week_info()
+
+    # Compute global week number (max existing + 1)
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(func.coalesce(func.max(WeeklyPlan.week_number), 0))
+            .where(WeeklyPlan.user_id == user_uid)
+        )
+        global_week_number = result.scalar() + 1
+
+        # Mark theme as used in pool (if pool ID provided)
+        if request.theme_pool_id:
+            try:
+                pool_uid = uuid.UUID(request.theme_pool_id)
+                pool_result = await session.execute(
+                    select(ThemePool).where(
+                        ThemePool.id == pool_uid,
+                        ThemePool.user_id == user_uid,
+                    )
+                )
+                pool_theme = pool_result.scalar_one_or_none()
+                if pool_theme:
+                    pool_theme.is_used = True
+                    await session.commit()
+            except Exception as e:
+                logger.warning("Failed to mark pool theme as used: %s", e)
+
     try:
         graph_app = build_planner_graph()
 
@@ -59,8 +114,11 @@ async def generate_plan(request: GeneratePlanRequest):
             "user_id": request.user_id,
             "thread_id": str(uuid.uuid4()),
             "selected_theme": request.selected_theme,
-            "week_number": request.week_number,
-            "week_range": request.week_range,
+            "week_number": global_week_number,
+            "week_range": week_info["week_range"],
+            "year": week_info["year"],
+            "month": week_info["month"],
+            "week_of_month": week_info["week_of_month"],
             "iteration_count": 0,
         }
 
@@ -79,8 +137,6 @@ async def generate_plan(request: GeneratePlanRequest):
         plan = final_state.get("personalized_plan") or final_state.get("draft_plan")
 
         if not plan:
-            # Surface the real upstream error (architect/auditor failure)
-            # rather than the generic save-node message.
             real_error = final_state.get("error") or "Pipeline produced no usable plan."
             logger.error("Pipeline failed — no plan in state. error=%s", real_error)
             raise HTTPException(
@@ -88,17 +144,20 @@ async def generate_plan(request: GeneratePlanRequest):
                 detail=real_error,
             )
 
-        # Plan exists — return it. Log any non-critical pipeline error
-        # (e.g. DB save failure) but don't block the user.
         if final_state.get("error"):
             logger.warning(
                 "Pipeline completed with non-fatal error: %s",
                 final_state["error"],
             )
 
+        # Include the saved plan's DB ID so frontend can navigate to it
+        saved_plan_id = final_state.get("saved_plan_id")
+        logger.info("Generate complete — saved_plan_id=%s", saved_plan_id)
+
         return {
             "status": "success",
             "plan": plan,
+            "plan_id": str(saved_plan_id) if saved_plan_id else None,
         }
 
     except HTTPException:
@@ -108,6 +167,80 @@ async def generate_plan(request: GeneratePlanRequest):
             status_code=500,
             detail=f"Plan generation failed: {e}",
         )
+
+
+@router.get("/{user_id}/plans")
+async def list_plans(user_id: str):
+    """List all saved plans for a user, ordered by creation date descending."""
+    try:
+        user_uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(WeeklyPlan)
+            .where(WeeklyPlan.user_id == user_uid)
+            .order_by(WeeklyPlan.created_at.desc())
+        )
+        plans = result.scalars().all()
+
+    return [
+        {
+            "id": str(p.id),
+            "global_week_number": p.week_number,
+            "week_of_month": p.week_of_month,
+            "month": p.month,
+            "year": p.year,
+            "theme": p.theme,
+            "theme_emoji": p.theme_emoji,
+            "week_range": p.week_range,
+            "palette": p.palette,
+            "domains": p.domains,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in plans
+    ]
+
+
+@router.get("/{user_id}/plan/{plan_id}")
+async def get_plan(user_id: str, plan_id: str):
+    """Fetch a full plan by its UUID."""
+    try:
+        user_uid = uuid.UUID(user_id)
+        plan_uid = uuid.UUID(plan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id or plan_id")
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(WeeklyPlan).where(
+                WeeklyPlan.id == plan_uid,
+                WeeklyPlan.user_id == user_uid,
+            )
+        )
+        plan_row = result.scalar_one_or_none()
+
+    if not plan_row:
+        raise HTTPException(status_code=404, detail="Plan not found.")
+
+    return {
+        "id": str(plan_row.id),
+        "week_number": plan_row.week_number,
+        "week_of_month": plan_row.week_of_month,
+        "month": plan_row.month,
+        "year": plan_row.year,
+        "week_range": plan_row.week_range,
+        "theme": plan_row.theme,
+        "theme_emoji": plan_row.theme_emoji,
+        "palette": plan_row.palette,
+        "domains": plan_row.domains,
+        "objectives": plan_row.objectives,
+        "circle_time": plan_row.circle_time,
+        "daily_plans": _rebuild_daily_plans(plan_row.activities or []),
+        "newsletter": plan_row.newsletter,
+        "cover_image_url": plan_row.cover_image_url,
+    }
 
 
 @router.get("/{user_id}/week/{week_number}/pdf")

@@ -1,7 +1,6 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router";
-import { ArrowLeft, MessageCircle } from "lucide-react";
-import { generateWeekPlan } from "../utils/mockData";
+import { useState, useEffect } from "react";
+import { Link, useNavigate, useParams } from "react-router";
+import { ArrowLeft, MessageCircle, Loader2 } from "lucide-react";
 import { ChatAssistant } from "../components/ChatAssistant";
 import { OverviewTab } from "../components/tabs/OverviewTab";
 import { CircleTimeTab } from "../components/tabs/CircleTimeTab";
@@ -13,6 +12,8 @@ import { DailyScheduleTab } from "../components/tabs/DailyScheduleTab";
 import { ThemeSelectionHeader } from "../components/ThemeSelectionHeader";
 import { useTheme } from "../contexts/ThemeContext";
 import { usePlanner } from "../contexts/PlannerContext";
+import { fetchPlanById } from "../utils/api";
+import { transformApiPlanToWeekPlan } from "../utils/apiTransformers";
 
 const tabs = [
   { id: "overview", label: "Overview" },
@@ -26,22 +27,63 @@ const tabs = [
 
 export default function WeeklyPlan() {
   const navigate = useNavigate();
+  const { weekId } = useParams<{ weekId: string }>();
   const [activeTab, setActiveTab] = useState("overview");
   const [isChatOpen, setIsChatOpen] = useState(false);
   const { setTheme, currentTheme } = useTheme();
-  const { currentPlan } = usePlanner();
+  const { currentPlan, currentPlanId, setCurrentPlan, setCurrentPlanId } = usePlanner();
 
-  // Use AI-generated plan if available, otherwise fall back to mock
-  const week = currentPlan ?? generateWeekPlan(1);
+  // Determine if we already have the plan in context
+  const hasPlanInContext = !!(currentPlanId === weekId && currentPlan);
+  const [loading, setLoading] = useState(!hasPlanInContext);
+  const [fetchFailed, setFetchFailed] = useState(false);
+
+  // Fetch plan from API if URL param doesn't match current plan in context
+  useEffect(() => {
+    if (!weekId) { setFetchFailed(true); return; }
+    if (currentPlanId === weekId && currentPlan) { setLoading(false); return; }
+
+    let cancelled = false;
+    setLoading(true);
+    setFetchFailed(false);
+    (async () => {
+      try {
+        const data = await fetchPlanById(weekId);
+        if (cancelled) return;
+        const plan = transformApiPlanToWeekPlan(data);
+        setCurrentPlan(plan);
+        setCurrentPlanId(weekId);
+      } catch (err) {
+        console.error("Failed to fetch plan:", err);
+        if (!cancelled) setFetchFailed(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekId]);
+
+  // Redirect to dashboard ONLY via useEffect after a confirmed fetch failure
+  useEffect(() => {
+    if (fetchFailed && !loading) {
+      navigate("/");
+    }
+  }, [fetchFailed, loading, navigate]);
+
+  const week = currentPlan;
 
   const handleThemeChange = (themeId: string) => {
     setTheme(themeId);
   };
 
-  // If no plan and no mock, redirect to dashboard
-  if (!week) {
-    navigate("/");
-    return null;
+  if (loading || !week) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+        <p className="text-sm text-muted-foreground">Loading plan…</p>
+      </div>
+    );
   }
 
   return (

@@ -9,15 +9,18 @@ export default function Dashboard() {
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const navigate = useNavigate();
-  const { currentPlan } = usePlanner();
+  const { currentPlan, currentPlanId } = usePlanner();
 
   const handleGenerate = () => {
     setShowGenerateModal(true);
   };
 
-  const handleGenerateComplete = () => {
+  const handleGenerateComplete = (planId?: string) => {
     setShowGenerateModal(false);
-    navigate("/week/1");
+    const id = planId || currentPlanId;
+    if (id) {
+      navigate(`/week/${id}`);
+    }
   };
 
   return (
@@ -110,13 +113,15 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              <Link
-                to="/week/1"
-                className="inline-flex items-center font-medium theme-transition hover:opacity-80"
-                style={{ color: 'var(--theme-primary)' }}
-              >
-                View Full Plan →
-              </Link>
+              {currentPlanId && (
+                <Link
+                  to={`/week/${currentPlanId}`}
+                  className="inline-flex items-center font-medium theme-transition hover:opacity-80"
+                  style={{ color: 'var(--theme-primary)' }}
+                >
+                  View Full Plan →
+                </Link>
+              )}
             </div>
           ) : (
             <div className="bg-white rounded-2xl shadow-sm border border-border p-6">
@@ -262,17 +267,19 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <Link
-                to="/week/1"
-                className="w-full py-5 rounded-2xl font-semibold flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-xl text-lg theme-transition border-2"
-                style={{ 
-                  backgroundColor: 'var(--theme-primary)',
-                  color: 'white',
-                  borderColor: 'var(--theme-primary)'
-                }}
-              >
-                View Full Week Plan →
-              </Link>
+              {currentPlanId && (
+                <Link
+                  to={`/week/${currentPlanId}`}
+                  className="w-full py-5 rounded-2xl font-semibold flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-xl text-lg theme-transition border-2"
+                  style={{ 
+                    backgroundColor: 'var(--theme-primary)',
+                    color: 'white',
+                    borderColor: 'var(--theme-primary)'
+                  }}
+                >
+                  View Full Week Plan →
+                </Link>
+              )}
             </div>
           ) : (
             <div className="bg-white rounded-3xl shadow-sm border-2 border-border p-8 flex flex-col justify-between min-h-[400px] hover:shadow-lg transition-all">
