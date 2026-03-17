@@ -1,6 +1,16 @@
 # Early Nurturer Planner
 
-AI-powered curriculum planning for infant and toddler classrooms (ages 0–36 months). Built with React + Vite + TailwindCSS frontend and FastAPI backend.
+AI-powered curriculum planning for infant and toddler classrooms (ages 0–36 months). Built with React + Vite + TailwindCSS frontend and FastAPI + LangGraph backend.
+
+## Features
+
+- **AI Theme Generation:** Gemini 2.5 Flash generates personalized weekly themes based on enrolled students
+- **Multi-Agent Pipeline:** Architect → Auditor → Personalizer workflow ensures safety-audited, developmentally appropriate curriculum
+- **Calendar View:** Manage multiple weeks with drag-and-drop reordering and delete functionality
+- **Timeline Synchronization:** Curriculum weeks automatically map to chronological calendar weeks
+- **YouTube Integration:** Real greeting/goodbye songs and yoga videos enriched via YouTube Data API
+- **Vector Search:** Yoga poses selected from curated catalog using semantic similarity (pgvector)
+- **PDF Generation:** Download professional curriculum PDFs with cover images
 
 ---
 

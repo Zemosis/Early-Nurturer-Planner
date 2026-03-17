@@ -795,3 +795,251 @@ Refactored `fetch_context_node()` to run `fetch_student_context()` and `query_pe
 - **Parallelization safety:** Context fetching is safe to parallelize because both operations are read-only. The Architect → Auditor → Personalizer sequence must remain sequential due to data dependencies and safety requirements.
 - **Model choice:** Gemini 2.5 Flash is already the optimal model for this use case — no further model upgrades available.
 - **GCS public images:** Pose photos are served directly from `https://storage.googleapis.com/{bucket}/yoga/{slug}.png`. No CDN or signed URLs needed for public educational content.
+
+---
+
+## Phase 9-10-11: Calendar View System & Timeline Synchronization & PDF Generation
+**Status:** Complete
+**Date:** March 17, 2026
+
+### Problem Statement
+
+Three critical issues emerged with the calendar view and plan management system:
+
+1. **Calendar View 500 Error:** The calendar view was completely blank, showing "No plans yet" even though plans existed in the database. Backend returned `500 Internal Server Error` on `GET /api/planner/{user_id}/plans`.
+2. **Week Numbering Collision:** Multiple plans generated on the same day had identical `week_range`, `month`, and `week_of_month` values (e.g., both showing "Week 3 • 3/16-3/20"), making them indistinguishable in the UI.
+3. **Curriculum vs Calendar Mismatch:** The system didn't maintain a strict timeline where Curriculum Week N always maps to the Nth chronological week from today.
+
+### Root Cause Analysis
+
+**500 Error (Critical):**
+- `list_plans`, `reorder_plans`, and `get_plan` endpoints all referenced `p.pdf_url` in their response serialization
+- The `pdf_url` column existed in the database (added via Alembic migration `c3d4e5f6a7b8`)
+- However, the `WeeklyPlan` SQLAlchemy model in `models.py` was missing the `pdf_url: Mapped[str | None]` declaration
+- Result: `AttributeError: 'WeeklyPlan' object has no attribute 'pdf_url'` → 500 on every plan-list request
+
+**Stale Unique Constraint:**
+- The `WeeklyPlan` model's `__table_args__` still declared `UniqueConstraint("user_id", "year", "month", "week_of_month")` from the original schema
+- Migration `d4e5f6a7b8c9` had already swapped this to `UniqueConstraint("user_id", "week_number")` in the actual database
+- The ORM model was out of sync with the DB schema
+
+**Week Numbering Issues:**
+- `generate_plan` used `max(week_number) + 1` to assign the next week number
+- When a plan was deleted, this left gaps (e.g., weeks 1, 2, 4, 5 → next plan becomes week 6 instead of 5)
+- All plans generated on the same day received identical `week_range` because `_compute_week_info()` always used `date.today()`
+- The reorder endpoint accepted client-computed date fields but didn't enforce chronological consistency
+
+### Fixes Applied
+
+#### 1. Database Model Sync (`backend/app/db/models.py`)
+
+**Added missing `pdf_url` column:**
+```python
+pdf_url: Mapped[str | None] = mapped_column(
+    String(512), doc="Public GCS URL to the generated PDF for this plan."
+)
+```
+
+**Fixed unique constraint to match DB:**
+```python
+__table_args__ = (
+    UniqueConstraint("user_id", "week_number",
+                     name="uq_weekly_plans_user_week_number"),
+    Index("ix_weekly_plans_user_created", "user_id", "created_at"),
+)
+```
+
+#### 2. Gap-Free Week Numbering (`backend/app/api/routers/planner.py`)
+
+Changed generation logic from `max(week_number) + 1` to `count(plans) + 1`:
+```python
+# Before:
+result = await session.execute(
+    select(func.coalesce(func.max(WeeklyPlan.week_number), 0))
+    .where(WeeklyPlan.user_id == user_uid)
+)
+global_week_number = result.scalar() + 1
+
+# After:
+result = await session.execute(
+    select(func.count(WeeklyPlan.id))
+    .where(WeeklyPlan.user_id == user_uid)
+)
+global_week_number = result.scalar() + 1
+```
+
+This ensures week numbers stay sequential (1, 2, 3...) even after deletions.
+
+#### 3. Server-Side Timeline Enforcement (`backend/app/api/routers/planner.py`)
+
+**Simplified `PlanPositionUpdate` schema:**
+```python
+# Before:
+class PlanPositionUpdate(BaseModel):
+    plan_id: str
+    week_number: int
+    week_range: str
+    year: int
+    month: int
+    week_of_month: int
+
+# After:
+class PlanPositionUpdate(BaseModel):
+    """A single plan ID in the new desired order."""
+    plan_id: str
+```
+
+**Rewrote `reorder_plans` endpoint:**
+- Client now sends only ordered `plan_id` list
+- Server assigns sequential `week_number = 1, 2, 3...` based on position
+- Server recomputes all date fields via `_compute_week_info(today + (N-1) weeks)`
+- Ensures Curriculum Week N always maps to today + (N-1) calendar weeks
+
+```python
+# Phase 2: assign sequential 1-based numbers with server-computed dates
+today = date.today()
+for new_num, uid in enumerate(plan_uids, start=1):
+    info = _compute_week_info(today=today + timedelta(weeks=new_num - 1))
+    await session.execute(
+        sa_update(WeeklyPlan)
+        .where(WeeklyPlan.id == uid, WeeklyPlan.user_id == user_uid)
+        .values(
+            week_number=new_num,
+            week_range=info["week_range"],
+            year=info["year"],
+            month=info["month"],
+            week_of_month=info["week_of_month"],
+        )
+    )
+```
+
+**Delete endpoint already correct:**
+- The `DELETE /{user_id}/plan/{plan_id}` endpoint (added in previous session) already implemented the correct renumbering + recompute logic
+- No changes needed
+
+#### 4. Frontend Simplification
+
+**API interface (`src/app/utils/api.ts`):**
+```typescript
+// Simplified from 6 fields to 1
+export interface PlanPositionUpdate {
+  plan_id: string;
+}
+```
+
+**CalendarView reorder logic (`src/app/pages/CalendarView.tsx`):**
+```typescript
+// Before: Client computed all date fields
+const updates: PlanPositionUpdate[] = localPlans.map((plan, idx) => ({
+  plan_id: plan.id,
+  week_number: origSorted[idx].global_week_number,
+  week_range: origSorted[idx].week_range,
+  year: origSorted[idx].year,
+  month: origSorted[idx].month,
+  week_of_month: origSorted[idx].week_of_month,
+}));
+
+// After: Client sends only ordered IDs
+const updates: PlanPositionUpdate[] = localPlans.map((plan) => ({
+  plan_id: plan.id,
+}));
+```
+
+#### 5. Database Wipe for Clean Testing
+
+Truncated both tables to ensure fresh start:
+```sql
+DELETE FROM weekly_plans;
+DELETE FROM theme_pool;
+```
+
+#### 6. PDF Generation & Storage System
+
+**Architecture:**
+- PDFs are generated on-demand via backend endpoints, not during plan generation
+- Generated PDFs are uploaded to GCS bucket and cached with public URLs
+- `pdf_url` column stores the GCS public URL for each plan
+
+**Endpoints (`backend/app/api/routers/planner.py`):**
+
+1. **`GET /{user_id}/plan/{plan_id}/pdf`** — Primary PDF download endpoint
+   - Checks if cached `pdf_url` exists in database
+   - If cached: Returns 302 redirect to GCS URL
+   - If not cached: Generates PDF, uploads to GCS, saves URL to DB, returns PDF bytes
+   - GCS path: `weekly-plans/{plan_id}.pdf`
+
+2. **`POST /{user_id}/plan/{plan_id}/regenerate-pdf`** — Force regenerate PDF
+   - Deletes old PDF from GCS (if exists)
+   - Generates fresh PDF with current plan data
+   - Uploads to GCS with new timestamp
+   - Updates `pdf_url` in database
+   - Returns new PDF bytes
+
+3. **`GET /{user_id}/week/{week_number}/pdf`** — Legacy endpoint (by week number)
+   - Fetches plan by `(user_id, week_number)`
+   - Generates PDF on-the-fly (no caching)
+   - Used for backward compatibility
+
+**PDF Service (`backend/app/services/pdf_service.py`):**
+- `generate_weekly_pdf(curriculum_data)` — Renders HTML template to PDF via WeasyPrint
+- `upload_pdf_to_gcs(pdf_bytes, plan_id)` — Uploads to GCS, makes public, returns URL
+- `save_pdf_url(plan_id, pdf_url)` — Updates `weekly_plans.pdf_url` column
+- `delete_pdf_from_gcs(plan_id)` — Removes old PDF from bucket
+
+**Frontend Integration (`src/app/components/CurriculumPDFDownload.tsx`):**
+- Calls `downloadPlanPDF(week.id, week.pdfUrl)` from `api.ts`
+- If `pdfUrl` exists: Direct download from cached GCS URL
+- If no `pdfUrl`: Triggers generation via `/plan/{id}/pdf` endpoint
+- "Regenerate PDF" button calls `/regenerate-pdf` endpoint
+
+**Migration History:**
+- `c3d4e5f6a7b8` — Added `pdf_url` column to `weekly_plans` table
+- Phase 11 — Added `pdf_url` to SQLAlchemy model (fixed 500 error)
+
+### Architecture Notes
+
+**Timeline Invariant:**
+- Curriculum Week 1 = this week (Monday–Friday)
+- Curriculum Week 2 = next week
+- Curriculum Week N = today + (N-1) weeks
+- This mapping is **always** maintained by the server, regardless of when plans were generated or how they're reordered
+
+**Client Responsibility:**
+- Send ordered list of `plan_id` values
+- Display plans in the order returned by the server
+- Trust server-computed date fields
+
+**Server Responsibility:**
+- Assign sequential `week_number` (1, 2, 3...)
+- Compute `week_range`, `year`, `month`, `week_of_month` based on `week_number`
+- Maintain the timeline invariant on every write operation (generate, reorder, delete)
+
+**Why Server-Side Recompute:**
+- Prevents client/server date calculation drift
+- Ensures all plans have consistent, chronologically ordered week ranges
+- Simplifies frontend logic (no date math)
+- Single source of truth for timeline mapping
+
+### Files Modified
+
+| File | Changes |
+|---|---|
+| `backend/app/db/models.py` | Added `pdf_url` mapped column; fixed unique constraint |
+| `backend/app/api/routers/planner.py` | Generate uses `count()` not `max()`; reorder recomputes all dates server-side; simplified `PlanPositionUpdate` |
+| `src/app/utils/api.ts` | Simplified `PlanPositionUpdate` interface |
+| `src/app/pages/CalendarView.tsx` | Simplified `saveReorder` to send only ordered IDs |
+
+### Testing Performed
+
+1. **500 Error Fix:** `GET /api/planner/{user_id}/plans` returns `[]` (empty array) instead of 500
+2. **Fresh Generation:** Generated 2 plans → Week 1 shows this week's dates, Week 2 shows next week's dates
+3. **Reorder:** Swapping plans updates their `week_number` and `week_range` to maintain chronological order
+4. **Delete:** Deleting Week 2 renumbers Week 3 → Week 2 with correct date recalculation
+
+### Performance Impact
+
+- **Reorder:** Slightly faster (no client-side date computation)
+- **Generate:** Negligible change (count vs max query performance is identical)
+- **List:** Fixed from 500 error to working response
+
+---

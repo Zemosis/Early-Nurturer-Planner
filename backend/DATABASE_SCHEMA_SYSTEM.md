@@ -116,8 +116,11 @@ Generated curriculum plans — stores the full plan payload as JSONB.
 |---|---|---|---|
 | `id` | UUID | PK | Plan ID |
 | `user_id` | UUID | FK → users.id, CASCADE | Educator |
-| `week_number` | INTEGER | NOT NULL | Week number (e.g. 1) |
-| `week_range` | VARCHAR(50) | NOT NULL | e.g. "2/23 - 2/27" |
+| `week_number` | INTEGER | NOT NULL | Curriculum week number (1, 2, 3...) — always sequential |
+| `year` | INTEGER | NOT NULL | Calendar year (e.g. 2026) |
+| `month` | INTEGER | NOT NULL | Calendar month (1-12) |
+| `week_of_month` | INTEGER | NOT NULL | Week number within the month (1-5) |
+| `week_range` | VARCHAR(50) | NOT NULL | e.g. "3/17 - 3/21" (Monday-Friday) |
 | `theme` | VARCHAR(255) | NOT NULL | Theme name |
 | `theme_emoji` | VARCHAR(10) | nullable | e.g. "🦊" |
 | `palette` | JSONB | nullable | `{primary, secondary, accent, background}` |
@@ -126,12 +129,24 @@ Generated curriculum plans — stores the full plan payload as JSONB.
 | `circle_time` | JSONB | nullable | Full circle time data (songs, yoga, letter, etc.) |
 | `activities` | JSONB | nullable | Flattened activity list (all 5 days combined) |
 | `newsletter` | JSONB | nullable | `{professional, warm}` versions |
+| `cover_image_url` | VARCHAR(512) | nullable | Public GCS URL to AI-generated cover image |
+| `pdf_url` | VARCHAR(512) | nullable | Public GCS URL to generated PDF |
 | `is_generated` | BOOLEAN | default true | AI-generated vs manually created |
 | `created_at` | TIMESTAMPTZ | | |
 | `updated_at` | TIMESTAMPTZ | | |
 
-**Index:** `ix_weekly_plans_user_week` on `(user_id, week_number)`
-**Constraint:** `UniqueConstraint("user_id", "week_number", name="uq_weekly_plans_user_week")` — enforces one plan per user per week. `save_plan_node` upserts (UPDATE if exists, INSERT if not). Migration: `023b423663bf`.
+**Indexes:**
+- `ix_weekly_plans_user_created` on `(user_id, created_at)` — for listing plans by creation date
+
+**Constraints:**
+- `UniqueConstraint("user_id", "week_number", name="uq_weekly_plans_user_week_number")` — enforces one plan per curriculum week per user
+- Migration `d4e5f6a7b8c9` swapped from calendar-based constraint `(user_id, year, month, week_of_month)` to curriculum-based `(user_id, week_number)`
+
+**Timeline Invariant:**
+- Curriculum Week N always maps to `today + (N-1) calendar weeks`
+- Week 1 = this week (Monday-Friday), Week 2 = next week, etc.
+- Server recomputes `year`, `month`, `week_of_month`, `week_range` on every write (generate, reorder, delete)
+- Ensures chronological consistency regardless of when plans were created
 
 ---
 

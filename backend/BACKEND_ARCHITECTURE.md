@@ -148,6 +148,78 @@ Triggers the full multi-agent LangGraph pipeline.
 
 ---
 
+### `GET /api/planner/{user_id}/plans`
+**Router:** `app/api/routers/planner.py`
+
+Lists all saved weekly plans for a user, ordered by creation date descending.
+
+**Response:**
+```json
+[
+  {
+    "id": "uuid",
+    "global_week_number": 1,
+    "week_of_month": 3,
+    "month": 3,
+    "year": 2026,
+    "theme": "Fox Forest",
+    "theme_emoji": "🦊",
+    "week_range": "3/17 - 3/21",
+    "palette": {...},
+    "domains": ["Fine Motor", "Language"],
+    "pdf_url": "https://storage.googleapis.com/...",
+    "created_at": "2026-03-17T12:00:00Z"
+  }
+]
+```
+
+---
+
+### `PATCH /api/planner/{user_id}/plans/reorder`
+**Router:** `app/api/routers/planner.py`
+
+Reorders plans to match the client-supplied sequence of plan IDs. Server recomputes all date fields to maintain the timeline invariant (Curriculum Week N = today + (N-1) calendar weeks).
+
+**Request:**
+```json
+[
+  {"plan_id": "uuid-3"},
+  {"plan_id": "uuid-1"},
+  {"plan_id": "uuid-2"}
+]
+```
+
+**Flow:**
+1. Validates all plan IDs belong to the user
+2. Two-phase update to avoid unique constraint violations:
+   - Phase 1: Set `week_number` to temporary negative values
+   - Phase 2: Assign sequential `week_number = 1, 2, 3...` based on position
+3. Recomputes `year`, `month`, `week_of_month`, `week_range` via `_compute_week_info(today + (N-1) weeks)`
+
+**Response:** Updated list of plans (same format as `GET /plans`)
+
+---
+
+### `DELETE /api/planner/{user_id}/plan/{plan_id}`
+**Router:** `app/api/routers/planner.py`
+
+Deletes a plan and renumbers all remaining plans sequentially (1, 2, 3...). Recomputes calendar data for each remaining plan.
+
+**Flow:**
+1. Deletes the specified plan
+2. Fetches remaining plans ordered by `week_number`
+3. Two-phase renumbering with date recomputation (same logic as reorder)
+
+**Response:**
+```json
+{
+  "deleted": "uuid",
+  "remaining_count": 2
+}
+```
+
+---
+
 ### `GET /health`
 Simple liveness probe. Returns `{"status": "ok"}`.
 
