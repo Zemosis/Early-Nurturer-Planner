@@ -120,7 +120,7 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
         themePoolId: poolUuid,
       });
 
-      const plan = transformApiPlanToWeekPlan(result.plan);
+      const plan = transformApiPlanToWeekPlan({ ...result.plan, id: result.plan_id });
       setCurrentPlan(plan);
       setCurrentPlanId(result.plan_id ?? null);
       setPlannerError(null);

@@ -15,13 +15,13 @@ from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update as sa_update
 
 from app.agents.graph import build_planner_graph
 from app.db.database import async_session_factory
 from app.db.models import WeeklyPlan, ThemePool
 from app.services.image_service import get_or_generate_cover_image
-from app.services.pdf_service import generate_weekly_pdf
+from app.services.pdf_service import generate_weekly_pdf, upload_pdf_to_gcs, save_pdf_url, delete_pdf_from_gcs
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,17 @@ class GeneratePlanRequest(BaseModel):
     user_id: str
     selected_theme: dict
     theme_pool_id: str | None = None  # UUID of the theme in the pool (to mark as used)
+
+
+class PlanPositionUpdate(BaseModel):
+    """A single plan's new positional fields for the reorder endpoint."""
+
+    plan_id: str
+    week_number: int
+    week_range: str
+    year: int
+    month: int
+    week_of_month: int
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -197,6 +208,101 @@ async def list_plans(user_id: str):
             "week_range": p.week_range,
             "palette": p.palette,
             "domains": p.domains,
+            "pdf_url": p.pdf_url,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in plans
+    ]
+
+
+@router.patch("/{user_id}/plans/reorder")
+async def reorder_plans(user_id: str, updates: list[PlanPositionUpdate]):
+    """Swap positional fields (week_number, week_range, year, month, week_of_month)
+    across a set of plans in a single atomic transaction.
+
+    Uses a two-phase update to avoid unique-constraint violations:
+      Phase 1 — set each plan's week_number to a temporary negative value
+      Phase 2 — set each plan's week_number (and other fields) to the target
+    """
+    try:
+        user_uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided")
+
+    plan_uids = []
+    for u in updates:
+        try:
+            plan_uids.append(uuid.UUID(u.plan_id))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid plan_id: {u.plan_id}")
+
+    async with async_session_factory() as session:
+        # Verify all plans belong to this user
+        result = await session.execute(
+            select(WeeklyPlan.id).where(
+                WeeklyPlan.id.in_(plan_uids),
+                WeeklyPlan.user_id == user_uid,
+            )
+        )
+        found_ids = {row[0] for row in result.all()}
+        missing = [str(uid) for uid in plan_uids if uid not in found_ids]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"Plans not found: {missing}")
+
+        # ── Phase 1: vacate unique slots with temporary negative week_numbers ──
+        for i, u in enumerate(updates):
+            temp_num = -(i + 1)
+            await session.execute(
+                sa_update(WeeklyPlan)
+                .where(WeeklyPlan.id == uuid.UUID(u.plan_id), WeeklyPlan.user_id == user_uid)
+                .values(week_number=temp_num)
+            )
+        await session.flush()
+
+        # ── Phase 2: apply target positional values ──
+        for u in updates:
+            await session.execute(
+                sa_update(WeeklyPlan)
+                .where(WeeklyPlan.id == uuid.UUID(u.plan_id), WeeklyPlan.user_id == user_uid)
+                .values(
+                    week_number=u.week_number,
+                    week_range=u.week_range,
+                    year=u.year,
+                    month=u.month,
+                    week_of_month=u.week_of_month,
+                )
+            )
+
+        await session.commit()
+        logger.info(
+            "Reordered %d plans for user %s", len(updates), user_id
+        )
+
+    # Return the updated plan summaries
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(WeeklyPlan)
+            .where(WeeklyPlan.user_id == user_uid)
+            .order_by(WeeklyPlan.week_number)
+        )
+        plans = result.scalars().all()
+
+    return [
+        {
+            "id": str(p.id),
+            "global_week_number": p.week_number,
+            "week_of_month": p.week_of_month,
+            "month": p.month,
+            "year": p.year,
+            "theme": p.theme,
+            "theme_emoji": p.theme_emoji,
+            "week_range": p.week_range,
+            "palette": p.palette,
+            "domains": p.domains,
+            "pdf_url": p.pdf_url,
             "created_at": p.created_at.isoformat() if p.created_at else None,
         }
         for p in plans
@@ -240,6 +346,7 @@ async def get_plan(user_id: str, plan_id: str):
         "daily_plans": _rebuild_daily_plans(plan_row.activities or []),
         "newsletter": plan_row.newsletter,
         "cover_image_url": plan_row.cover_image_url,
+        "pdf_url": plan_row.pdf_url,
     }
 
 
@@ -294,6 +401,163 @@ async def download_plan_pdf(user_id: str, week_number: int):
 
     safe_theme = plan_row.theme.replace(" ", "_") if plan_row.theme else "Plan"
     filename = f"{safe_theme}_Week{week_number}_Curriculum.pdf"
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{user_id}/plan/{plan_id}/pdf")
+async def download_plan_pdf_by_id(user_id: str, plan_id: str):
+    """Download a weekly plan PDF by its UUID.
+
+    If a cached PDF exists in GCS, redirects to it.
+    Otherwise generates the PDF, uploads to GCS, caches the URL, and serves it.
+    """
+    try:
+        user_uid = uuid.UUID(user_id)
+        plan_uid = uuid.UUID(plan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id or plan_id")
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(WeeklyPlan).where(
+                WeeklyPlan.id == plan_uid,
+                WeeklyPlan.user_id == user_uid,
+            )
+        )
+        plan_row = result.scalar_one_or_none()
+
+    if not plan_row:
+        raise HTTPException(status_code=404, detail="Plan not found.")
+
+    # ── Return cached PDF if available (proxied to avoid CORS) ─
+    if plan_row.pdf_url:
+        logger.info("Proxying cached PDF for plan %s from %s", plan_id, plan_row.pdf_url)
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                gcs_resp = await client.get(plan_row.pdf_url)
+                gcs_resp.raise_for_status()
+            safe_theme = (plan_row.theme or "Plan").replace(" ", "_")
+            filename = f"{safe_theme}_Week{plan_row.week_number}_Curriculum.pdf"
+            return StreamingResponse(
+                io.BytesIO(gcs_resp.content),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        except Exception as e:
+            logger.error("Failed to proxy cached PDF for plan %s: %s — regenerating", plan_id, e)
+            # Fall through to regeneration if the GCS fetch fails
+
+    # ── Generate, upload, and cache ────────────────────────
+    cover_image_url = await get_or_generate_cover_image(plan_row)
+
+    curriculum_data = {
+        "theme": plan_row.theme,
+        "theme_emoji": plan_row.theme_emoji,
+        "week_number": plan_row.week_number,
+        "week_range": plan_row.week_range,
+        "palette": plan_row.palette,
+        "domains": plan_row.domains,
+        "objectives": plan_row.objectives,
+        "circle_time": plan_row.circle_time,
+        "daily_plans": _rebuild_daily_plans(plan_row.activities or []),
+        "newsletter": plan_row.newsletter,
+        "cover_image_url": cover_image_url,
+    }
+
+    try:
+        pdf_bytes = await generate_weekly_pdf(curriculum_data)
+    except Exception as e:
+        logger.error("PDF generation failed for plan %s: %s", plan_id, e)
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+
+    # Upload to GCS and cache URL in DB (best-effort)
+    try:
+        gcs_url = upload_pdf_to_gcs(pdf_bytes, plan_uid, plan_row.theme or "plan")
+        await save_pdf_url(plan_uid, gcs_url)
+    except Exception as e:
+        logger.error("Failed to cache PDF to GCS for plan %s: %s", plan_id, e)
+        # Still serve the generated bytes even if caching fails
+
+    safe_theme = (plan_row.theme or "Plan").replace(" ", "_")
+    filename = f"{safe_theme}_Week{plan_row.week_number}_Curriculum.pdf"
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/{user_id}/plan/{plan_id}/pdf/regenerate")
+async def regenerate_plan_pdf(user_id: str, plan_id: str):
+    """Force-regenerate the PDF for a plan.
+
+    Deletes the existing cached PDF from GCS (if any), generates a fresh one,
+    uploads it, and updates the pdf_url in the database.
+    Returns the new PDF bytes.
+    """
+    try:
+        user_uid = uuid.UUID(user_id)
+        plan_uid = uuid.UUID(plan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id or plan_id")
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(WeeklyPlan).where(
+                WeeklyPlan.id == plan_uid,
+                WeeklyPlan.user_id == user_uid,
+            )
+        )
+        plan_row = result.scalar_one_or_none()
+
+    if not plan_row:
+        raise HTTPException(status_code=404, detail="Plan not found.")
+
+    # ── Delete existing cached PDF from GCS ─────────────────
+    if plan_row.pdf_url:
+        logger.info("Deleting existing cached PDF for plan %s", plan_id)
+        delete_pdf_from_gcs(plan_row.pdf_url)
+
+    # ── Generate fresh PDF ──────────────────────────────────
+    cover_image_url = await get_or_generate_cover_image(plan_row)
+
+    curriculum_data = {
+        "theme": plan_row.theme,
+        "theme_emoji": plan_row.theme_emoji,
+        "week_number": plan_row.week_number,
+        "week_range": plan_row.week_range,
+        "palette": plan_row.palette,
+        "domains": plan_row.domains,
+        "objectives": plan_row.objectives,
+        "circle_time": plan_row.circle_time,
+        "daily_plans": _rebuild_daily_plans(plan_row.activities or []),
+        "newsletter": plan_row.newsletter,
+        "cover_image_url": cover_image_url,
+    }
+
+    try:
+        pdf_bytes = await generate_weekly_pdf(curriculum_data)
+    except Exception as e:
+        logger.error("PDF regeneration failed for plan %s: %s", plan_id, e)
+        raise HTTPException(status_code=500, detail=f"PDF regeneration failed: {e}")
+
+    # ── Upload new PDF and cache URL ────────────────────────
+    try:
+        gcs_url = upload_pdf_to_gcs(pdf_bytes, plan_uid, plan_row.theme or "plan")
+        await save_pdf_url(plan_uid, gcs_url)
+        logger.info("Regenerated PDF cached at %s", gcs_url)
+    except Exception as e:
+        logger.error("Failed to cache regenerated PDF for plan %s: %s", plan_id, e)
+
+    safe_theme = (plan_row.theme or "Plan").replace(" ", "_")
+    filename = f"{safe_theme}_Week{plan_row.week_number}_Curriculum.pdf"
 
     return StreamingResponse(
         io.BytesIO(pdf_bytes),

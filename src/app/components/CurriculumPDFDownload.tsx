@@ -4,9 +4,9 @@
  */
 
 import { useState, useEffect } from 'react';
-import { FileText, Download, Eye, Printer, Check, Sparkles, AlertCircle } from 'lucide-react';
+import { FileText, Download, Eye, Printer, Check, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
 import { WeekPlan } from '../utils/mockData';
-import { downloadPlanPDF } from '../utils/api';
+import { downloadPlanPDF, regeneratePlanPDF } from '../utils/api';
 
 interface CurriculumPDFDownloadProps {
   week: WeekPlan;
@@ -15,6 +15,7 @@ interface CurriculumPDFDownloadProps {
 export function CurriculumPDFDownload({ week }: CurriculumPDFDownloadProps) {
   const [pdfGenerated, setPdfGenerated] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +43,10 @@ export function CurriculumPDFDownload({ week }: CurriculumPDFDownloadProps) {
   });
 
   const fetchPdfBlob = async (): Promise<Blob> => {
-    return downloadPlanPDF({ weekNumber: week.weekNumber });
+    return downloadPlanPDF({
+      planId: week.id,
+      cachedPdfUrl: week.pdfUrl,
+    });
   };
 
   const handleGenerateAndDownload = async () => {
@@ -100,6 +104,28 @@ export function CurriculumPDFDownload({ week }: CurriculumPDFDownloadProps) {
       setError(err instanceof Error ? err.message : 'PDF print failed');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    setIsRegenerating(true);
+    setError(null);
+
+    try {
+      const blob = await regeneratePlanPDF(week.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${week.theme.replace(/\s+/g, '_')}_Week${week.weekNumber}_Curriculum.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setPdfGenerated(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'PDF regeneration failed');
+    } finally {
+      setIsRegenerating(false);
     }
   };
 
@@ -282,13 +308,34 @@ export function CurriculumPDFDownload({ week }: CurriculumPDFDownloadProps) {
 
           <button
             onClick={handlePrint}
-            disabled={isGenerating}
+            disabled={isGenerating || isRegenerating}
             className="w-full flex items-center justify-center gap-2 px-6 py-3 border border-border text-muted-foreground rounded-xl font-medium hover:bg-muted/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ minHeight: '44px' }}
           >
             <Printer className="w-5 h-5" />
             <span>Print Curriculum</span>
           </button>
+
+          {week.pdfUrl && (
+            <button
+              onClick={handleRegenerate}
+              disabled={isGenerating || isRegenerating}
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 border border-amber-300 text-amber-700 bg-amber-50 rounded-xl font-medium hover:bg-amber-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ minHeight: '44px' }}
+            >
+              {isRegenerating ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
+                  <span>Regenerating…</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Regenerate PDF</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Features List */}

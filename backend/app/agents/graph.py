@@ -153,7 +153,7 @@ async def save_plan_node(state: PlannerState) -> dict:
                 is_generated=True,
             )
             stmt = stmt.on_conflict_do_update(
-                constraint="uq_weekly_plans_user_year_month_week",
+                constraint="uq_weekly_plans_user_week_number",
                 set_={
                     "week_number": stmt.excluded.week_number,
                     "week_range": stmt.excluded.week_range,

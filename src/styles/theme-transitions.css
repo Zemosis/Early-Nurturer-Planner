@@ -86,6 +86,10 @@
 }
 
 /* Hover states */
+.hover\:bg-theme-primary-light:hover {
+  background-color: var(--theme-primary-light);
+}
+
 .hover\:bg-theme-primary-dark:hover {
   background-color: var(--theme-primary-dark);
 }

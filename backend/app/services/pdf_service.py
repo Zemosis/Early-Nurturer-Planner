@@ -3,21 +3,32 @@ PDF generation service for weekly curriculum plans.
 
 Uses Jinja2 HTML templating + WeasyPrint to produce beautiful,
 print-ready PDF documents with dynamic theme palette colors.
+
+Generated PDFs are uploaded to GCS and the URL is cached in the
+database so subsequent requests skip regeneration entirely.
 """
 
 import asyncio
 import base64
 import logging
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+from google.cloud import storage
 from jinja2 import Environment, FileSystemLoader
+from sqlalchemy import update
 from weasyprint import HTML
 
+from app.db.database import async_session_factory
+from app.db.models import WeeklyPlan
 from app.services.image_service import get_or_generate_daily_image
+from config import settings
 
 logger = logging.getLogger(__name__)
+
+GCS_PDF_FOLDER = "curriculum_pdfs"
 
 
 def _darken_hex_color(hex_color: str, factor: float = 0.88) -> str:
@@ -174,3 +185,48 @@ async def generate_weekly_pdf(curriculum_data: dict) -> bytes:
 
     logger.info("PDF generated: %d bytes", len(pdf_bytes))
     return pdf_bytes
+
+
+def upload_pdf_to_gcs(pdf_bytes: bytes, plan_id: uuid.UUID, theme: str) -> str:
+    """Upload PDF bytes to GCS and return the public URL."""
+    safe_theme = (theme or "plan").lower().replace(" ", "_")[:40]
+    blob_name = f"{GCS_PDF_FOLDER}/{plan_id}_{safe_theme}.pdf"
+
+    client = storage.Client(project=settings.GCP_PROJECT_ID)
+    bucket = client.bucket(settings.GCS_BUCKET_NAME)
+    blob = bucket.blob(blob_name)
+    blob.upload_from_string(pdf_bytes, content_type="application/pdf")
+
+    public_url = f"https://storage.googleapis.com/{settings.GCS_BUCKET_NAME}/{blob_name}"
+    logger.info("Uploaded PDF to %s", public_url)
+    return public_url
+
+
+async def save_pdf_url(plan_id: uuid.UUID, url: str) -> None:
+    """Persist the pdf_url to the database."""
+    async with async_session_factory() as session:
+        await session.execute(
+            update(WeeklyPlan)
+            .where(WeeklyPlan.id == plan_id)
+            .values(pdf_url=url)
+        )
+        await session.commit()
+    logger.info("Saved pdf_url for plan %s", plan_id)
+
+
+def delete_pdf_from_gcs(pdf_url: str) -> None:
+    """Delete a PDF blob from GCS given its public URL. No-op if not found."""
+    try:
+        # Extract blob name from URL: https://storage.googleapis.com/{bucket}/{blob}
+        prefix = f"https://storage.googleapis.com/{settings.GCS_BUCKET_NAME}/"
+        if not pdf_url.startswith(prefix):
+            logger.warning("pdf_url does not match expected GCS prefix: %s", pdf_url)
+            return
+        blob_name = pdf_url[len(prefix):]
+        client = storage.Client(project=settings.GCP_PROJECT_ID)
+        bucket = client.bucket(settings.GCS_BUCKET_NAME)
+        blob = bucket.blob(blob_name)
+        blob.delete()
+        logger.info("Deleted PDF blob from GCS: %s", blob_name)
+    except Exception as e:
+        logger.error("Failed to delete PDF from GCS (%s): %s", pdf_url, e)

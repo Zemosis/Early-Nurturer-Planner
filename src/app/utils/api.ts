@@ -120,6 +120,31 @@ export interface WeekPlanSummary {
   created_at: string | null;
 }
 
+export interface PlanPositionUpdate {
+  plan_id: string;
+  week_number: number;
+  week_range: string;
+  year: number;
+  month: number;
+  week_of_month: number;
+}
+
+export async function reorderPlans(
+  updates: PlanPositionUpdate[],
+  userId: string = DEFAULT_USER_ID
+): Promise<WeekPlanSummary[]> {
+  const res = await fetch(`${API_BASE}/api/planner/${userId}/plans/reorder`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Reorder failed");
+  }
+  return res.json();
+}
+
 export async function fetchAllPlans(
   userId: string = DEFAULT_USER_ID
 ): Promise<WeekPlanSummary[]> {
@@ -147,7 +172,8 @@ export async function fetchPlanById(
 
 export interface DownloadPDFParams {
   userId?: string;
-  weekNumber: number;
+  planId: string;
+  cachedPdfUrl?: string | null;
 }
 
 export async function downloadPlanPDF(
@@ -155,12 +181,30 @@ export async function downloadPlanPDF(
 ): Promise<Blob> {
   const userId = params.userId ?? DEFAULT_USER_ID;
   const res = await fetch(
-    `${API_BASE}/api/planner/${userId}/week/${params.weekNumber}/pdf`
+    `${API_BASE}/api/planner/${userId}/plan/${params.planId}/pdf`
   );
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "PDF download failed");
+  }
+
+  return res.blob();
+}
+
+export async function regeneratePlanPDF(
+  planId: string,
+  userId?: string
+): Promise<Blob> {
+  const uid = userId ?? DEFAULT_USER_ID;
+  const res = await fetch(
+    `${API_BASE}/api/planner/${uid}/plan/${planId}/pdf/regenerate`,
+    { method: "POST" }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "PDF regeneration failed");
   }
 
   return res.blob();

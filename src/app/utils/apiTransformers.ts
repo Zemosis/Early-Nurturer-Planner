@@ -224,6 +224,7 @@ export function transformApiPlanToWeekPlan(api: any): WeekPlan {
       warm: api.newsletter?.warm_version ?? "",
     },
     coverImageUrl: api.cover_image_url ?? undefined,
+    pdfUrl: api.pdf_url ?? undefined,
     generated: true,
   };
 }

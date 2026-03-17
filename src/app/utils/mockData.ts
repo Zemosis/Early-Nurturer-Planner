@@ -66,6 +66,7 @@ export interface WeekPlan {
     warm: string;
   };
   coverImageUrl?: string;
+  pdfUrl?: string;
   generated: boolean;
 }
 
