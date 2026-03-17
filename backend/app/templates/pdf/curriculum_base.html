@@ -13,6 +13,7 @@
       --color-secondary: {{ palette.secondary | default('#8B6F47') }};
       --color-accent: {{ palette.accent | default('#D4845B') }};
       --color-background: {{ palette.background | default('#F5F1E8') }};
+      --color-background-dark: {{ background_dark | default('#dcd8cf') }};
       {% endif %}
     }
   </style>
@@ -45,58 +46,69 @@
        PAGE 2: WEEKLY THEME OVERVIEW
        ════════════════════════════════════════════════════════ -->
   <div class="section">
-    <div class="section-header">Weekly Theme Overview</div>
-
-    <p class="section-intro">
-      This week we explore <strong>"{{ theme }}"</strong> across multiple
-      developmental domains, weaving thematic connections into every activity,
-      circle-time element, and home connection.
-    </p>
-
-    <div class="overview-grid">
-      <div class="overview-card">
-        <h4>Developmental Domains</h4>
-        <p>
-          {% for domain in domains %}
-            <span class="domain-tag">{{ domain }}</span>
-          {% endfor %}
-        </p>
-      </div>
-
-      <div class="overview-card">
-        <h4>Circle Time Focus</h4>
-        <p>
-          {% if circle_time %}
-          Letter: <strong>{{ circle_time.letter }}</strong> &bull;
-          Color: <strong>{{ circle_time.color }}</strong> &bull;
-          Shape: <strong>{{ circle_time.shape }}</strong> &bull;
-          Counting to: <strong>{{ circle_time.counting_to }}</strong>
-          {% endif %}
-        </p>
-      </div>
-    </div>
-
-    {% if objectives %}
-    <h3>Weekly Objectives</h3>
-    <ul class="objectives-list">
-      {% for obj in objectives %}
-      <li>
-        <span class="domain-tag">{{ obj.domain }}</span>
-        {{ obj.goal }}
-      </li>
-      {% endfor %}
-    </ul>
+    {% if daily_bg_uris %}
+    <img src="{{ daily_bg_uris | random }}" alt="theme background" class="page-bg-image">
     {% endif %}
+    <div class="main-content-wrapper">
+    <div class="section-header">Weekly Theme Overview</div>
+    <div class="content-overlay">
+      <p class="section-intro">
+        This week we explore <strong>"{{ theme }}"</strong> across multiple
+        developmental domains, weaving thematic connections into every activity,
+        circle-time element, and home connection.
+      </p>
+
+      <div class="overview-grid">
+        <div class="overview-card">
+          <h4>Developmental Domains</h4>
+          <p>
+            {% for domain in domains %}
+              <span class="domain-tag">{{ domain }}</span>
+            {% endfor %}
+          </p>
+        </div>
+
+        <div class="overview-card">
+          <h4>Circle Time Focus</h4>
+          <p>
+            {% if circle_time %}
+            Letter: <strong>{{ circle_time.letter }}</strong> &bull;
+            Color: <strong>{{ circle_time.color }}</strong> &bull;
+            Shape: <strong>{{ circle_time.shape }}</strong> &bull;
+            Counting to: <strong>{{ circle_time.counting_to }}</strong>
+            {% endif %}
+          </p>
+        </div>
+      </div>
+
+      {% if objectives %}
+      <h3>Weekly Objectives</h3>
+      <ul class="objectives-list">
+        {% for obj in objectives %}
+        <li>
+          <span class="domain-tag">{{ obj.domain }}</span>
+          {{ obj.goal }}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    </div>
   </div>
 
   <!-- ════════════════════════════════════════════════════════
        PAGES 3+: DAILY ACTIVITIES (Mon–Fri)
        ════════════════════════════════════════════════════════ -->
   <div class="section">
+    {% if daily_bg_uris %}
+    <img src="{{ daily_bg_uris | random }}" alt="theme background" class="page-bg-image">
+    {% endif %}
+    <div class="main-content-wrapper">
     <div class="section-header">Daily Activities Schedule</div>
 
     {% for day_plan in daily_plans %}
     <div class="day-block">
+
       <div class="day-header">
         <h3>{{ day_plan.day }}</h3>
         <span class="focus-domain">{{ day_plan.focus_domain }}</span>
@@ -166,6 +178,7 @@
       {% endfor %}
     </div>
     {% endfor %}
+    </div>
   </div>
 
   <!-- ════════════════════════════════════════════════════════
@@ -173,7 +186,12 @@
        ════════════════════════════════════════════════════════ -->
   {% if circle_time %}
   <div class="section">
+    {% if daily_bg_uris %}
+    <img src="{{ daily_bg_uris | random }}" alt="theme background" class="page-bg-image">
+    {% endif %}
+    <div class="main-content-wrapper">
     <div class="section-header">Circle Time Overview</div>
+    <div class="content-overlay">
 
     <div class="circle-grid">
       <div class="circle-item">
@@ -267,6 +285,8 @@
       <p><em>{{ circle_time.discussion_prompt }}</em></p>
     </div>
     {% endif %}
+    </div>
+    </div>
   </div>
   {% endif %}
 
@@ -274,19 +294,26 @@
        MATERIALS CHECKLIST
        ════════════════════════════════════════════════════════ -->
   <div class="section">
+    {% if daily_bg_uris %}
+    <img src="{{ daily_bg_uris | random }}" alt="theme background" class="page-bg-image">
+    {% endif %}
+    <div class="main-content-wrapper">
     <div class="section-header">Materials &amp; Supplies Checklist</div>
-    <p class="section-intro">
-      All materials needed for this week's activities, collected and deduplicated
-      for easy prep.
-    </p>
+    <div class="content-overlay">
+      <p class="section-intro">
+        All materials needed for this week's activities, collected and deduplicated
+        for easy prep.
+      </p>
 
-    <div class="materials-grid">
-      {% for material in all_materials %}
-      <div class="material-item">
-        <span class="checkbox"></span>
-        <span>{{ material }}</span>
+      <div class="materials-grid">
+        {% for material in all_materials %}
+        <div class="material-item">
+          <span class="checkbox"></span>
+          <span>{{ material }}</span>
+        </div>
+        {% endfor %}
       </div>
-      {% endfor %}
+    </div>
     </div>
   </div>
 
@@ -295,7 +322,12 @@
        ════════════════════════════════════════════════════════ -->
   {% if newsletter %}
   <div class="section">
+    {% if daily_bg_uris %}
+    <img src="{{ daily_bg_uris | random }}" alt="theme background" class="page-bg-image">
+    {% endif %}
+    <div class="main-content-wrapper">
     <div class="section-header">Parent Newsletter</div>
+    <div class="content-overlay">
 
     <div class="newsletter-section">
       <h3>Welcome</h3>
@@ -328,6 +360,8 @@
       <p class="newsletter-text">{{ newsletter.warm_version }}</p>
     </div>
     {% endif %}
+    </div>
+    </div>
   </div>
   {% endif %}
 
@@ -335,7 +369,12 @@
        DOCUMENTATION CHECKLIST
        ════════════════════════════════════════════════════════ -->
   <div class="section">
+    {% if daily_bg_uris %}
+    <img src="{{ daily_bg_uris | random }}" alt="theme background" class="page-bg-image">
+    {% endif %}
+    <div class="main-content-wrapper">
     <div class="section-header">Documentation &amp; Observation Checklist</div>
+    <div class="content-overlay">
 
     <h3>Developmental Observations</h3>
     <div class="materials-grid" style="margin-bottom: 14pt;">
@@ -371,6 +410,8 @@
         <span>{{ task }}</span>
       </div>
       {% endfor %}
+    </div>
+    </div>
     </div>
   </div>
 

@@ -15,7 +15,7 @@ import re
 
 from google import genai
 from google.genai import types
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from app.agents.schemas import WeekPlanSchema
 from app.agents.state import PlannerState
@@ -40,7 +40,9 @@ _SURROGATE_RE = re.compile(r'\\u[dD][89a-fA-F][0-9a-fA-F]{2}')
 
 ARCHITECT_SYSTEM_PROMPT = """\
 You are a senior Montessori curriculum designer for infant/toddler classrooms \
-(ages 0–36 months). Produce a COMPLETE 5-day weekly curriculum plan.
+(ages 0–36 months). Produce a COMPLETE 5-day weekly curriculum plan as a \
+single valid JSON object matching the schema below. Output ONLY the JSON — \
+no markdown fences, no commentary.
 
 Requirements:
 - Developmentally appropriate for every enrolled age group.
@@ -55,9 +57,9 @@ Structure:
 - Each activity: safety_notes (specific, not vague) + at least one adaptation.
 - Circle time: greeting song, goodbye song, 2–3 yoga poses, read-aloud, \
   discussion prompt.
-- yoga_poses: 2–3 entries with a short thematic keyword in `name` \
-  (e.g. "forest animals"). Leave image_url, how_to, creative_cues empty.
-- Newsletter: professional version + warm/friendly version.
+- yoga_poses: 2–3 entries with a short thematic keyword in `name`. \
+  Leave image_url as "", how_to and creative_cues as [].
+- Newsletter: professional_version + warm_version fields.
 - IDs: URL-safe kebab-case. Palette: valid 6-digit hex (e.g. '#7A9B76').
 - Songs: 4–8 line scripts an educator can sing or chant.
 
@@ -69,6 +71,62 @@ Safety checklist (verify before outputting):
 Fix any failures before responding.
 
 Tailor to the student roster and ground choices in the pedagogy context.
+
+JSON SCHEMA (follow exactly — all fields required unless noted):
+{
+  "id": "week-<N>-<theme-slug>",
+  "week_number": <int>,
+  "week_range": "<string>",
+  "theme": "<string>",
+  "theme_emoji": "<emoji>",
+  "palette": {"primary":"#RRGGBB","secondary":"#RRGGBB","accent":"#RRGGBB","background":"#RRGGBB"},
+  "domains": ["<string>", ...],
+  "objectives": [{"domain":"<string>","goal":"<string>"}, ...],
+  "circle_time": {
+    "letter": "<single letter>",
+    "color": "<string>",
+    "shape": "<string>",
+    "counting_to": <int>,
+    "greeting_song": {"title":"<string>","script":"<string>","duration":"<MM:SS>"},
+    "goodbye_song":  {"title":"<string>","script":"<string>","duration":"<MM:SS>"},
+    "yoga_poses": [{"name":"<keyword>","image_url":"","how_to":[],"creative_cues":[]}, ...],
+    "read_aloud": "<string>",
+    "discussion_prompt": "<string>"
+  },
+  "daily_plans": [
+    {
+      "day": "Monday",
+      "focus_domain": "<string>",
+      "activities": [
+        {
+          "id": "<kebab-case>",
+          "day": "Monday",
+          "title": "<string>",
+          "domain": "<string>",
+          "duration": <int minutes>,
+          "description": "<string>",
+          "theme_connection": "<string>",
+          "materials": ["<string>", ...],
+          "safety_notes": "<string>",
+          "adaptations": [
+            {"age_group":"0-12m","description":"<string>","modifications":["<string>",...]},
+            {"age_group":"12-24m","description":"<string>","modifications":["<string>",...]},
+            {"age_group":"24-36m","description":"<string>","modifications":["<string>",...]}
+          ],
+          "reflection_prompts": ["<string>", ...]
+        }
+      ]
+    },
+    ... (repeat for Tuesday, Wednesday, Thursday, Friday)
+  ],
+  "newsletter": {
+    "welcome_message": "<string>",
+    "learning_goals": ["<string>", ...],
+    "home_connection": "<string>",
+    "professional_version": "<string>",
+    "warm_version": "<string>"
+  }
+}
 """
 
 
@@ -136,7 +194,7 @@ async def curriculum_architect(state: PlannerState) -> dict:
             f"redesign them entirely."
         )
 
-    # ── Call Gemini with structured output ─────────────────────
+    # ── Call Gemini (JSON mode — no response_schema to avoid 400 on deep nesting) ──
     logger.info("Architect: calling Gemini (iteration %d)", iteration_count)
     try:
         response = await gemini_client.aio.models.generate_content(
@@ -145,44 +203,62 @@ async def curriculum_architect(state: PlannerState) -> dict:
             config=types.GenerateContentConfig(
                 system_instruction=ARCHITECT_SYSTEM_PROMPT,
                 response_mime_type="application/json",
-                response_schema=WeekPlanSchema,
                 temperature=0.7,
-                max_output_tokens=24576,
+                max_output_tokens=32768,
             ),
         )
 
         raw_text = response.text
         if not raw_text:
             logger.warning("Architect: Gemini returned empty response")
-            return {
-                "draft_plan": None,
+            # Only clear draft_plan on first pass; preserve previous draft on revisions
+            update: dict = {
                 "iteration_count": iteration_count + 1,
                 "error": "Gemini returned an empty response.",
             }
+            if iteration_count == 0:
+                update["draft_plan"] = None
+            return update
 
         logger.info("Architect: received %d chars, validating schema", len(raw_text))
 
         # Sanitize lone surrogate escapes before parsing
         raw_text = _SURROGATE_RE.sub('', raw_text)
 
+        # Extract JSON block if wrapped in markdown fences
+        json_match = re.search(r'```(?:json)?\s*([\s\S]+?)\s*```', raw_text)
+        if json_match:
+            raw_text = json_match.group(1)
+
         # Validate through Pydantic
-        adapter = TypeAdapter(WeekPlanSchema)
-        plan = adapter.validate_json(raw_text)
+        try:
+            adapter = TypeAdapter(WeekPlanSchema)
+            plan = adapter.validate_json(raw_text)
+        except ValidationError as ve:
+            logger.error("Architect: Pydantic validation failed — %s", ve)
+            update = {
+                "iteration_count": iteration_count + 1,
+                "error": f"Architect schema validation failed: {ve}",
+            }
+            if iteration_count == 0:
+                update["draft_plan"] = None
+            return update
 
         logger.info("Architect: plan validated successfully")
 
-        plan_dict = plan.model_dump()
-
         return {
-            "draft_plan": plan_dict,
+            "draft_plan": plan.model_dump(),
             "iteration_count": iteration_count + 1,
             "error": None,
         }
 
     except Exception as e:
         logger.error("Architect: generation failed — %s", e, exc_info=True)
-        return {
-            "draft_plan": None,
+        # Only clear draft_plan on first pass; preserve previous good draft on revisions
+        update = {
             "iteration_count": iteration_count + 1,
             "error": f"Architect generation failed: {e}",
         }
+        if iteration_count == 0:
+            update["draft_plan"] = None
+        return update

@@ -3,6 +3,8 @@
    Fallbacks use a soft Montessori-inspired earthy palette.
    ─────────────────────────────────────────────────────────── */
 
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&family=Nunito:wght@300;400;600;700&display=swap');
+
 :root {
   --color-primary: #7A9B76;
   --color-secondary: #8B6F47;
@@ -19,23 +21,8 @@
 
 @page {
   size: A4;
-  margin: 18mm 16mm 22mm 16mm;
-
-  @bottom-center {
-    content: counter(page);
-    font-family: "DejaVu Sans", system-ui, sans-serif;
-    font-size: 8pt;
-    color: var(--color-text-muted);
-  }
-}
-
-@page :first {
-  margin-top: 0;
-  margin-bottom: 0;
-
-  @bottom-center {
-    content: none;
-  }
+  margin: 0;
+  padding: 0;
 }
 
 /* ── Base Typography ─────────────────────────────────────── */
@@ -47,17 +34,19 @@
 }
 
 body {
-  font-family: "DejaVu Sans", system-ui, -apple-system, sans-serif;
+  font-family: "Nunito", "DejaVu Sans", system-ui, -apple-system, sans-serif;
   font-size: 10pt;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--color-text);
+  background-color: var(--color-background-dark, #E8E3D8);
 }
 
 h1, h2, h3, h4 {
-  font-family: Georgia, "DejaVu Serif", "Times New Roman", serif;
+  font-family: "Quicksand", Georgia, "DejaVu Serif", serif;
   color: var(--color-primary);
-  line-height: 1.25;
+  line-height: 1.3;
   page-break-after: avoid;
+  font-weight: 600;
 }
 
 h1 { font-size: 26pt; }
@@ -72,15 +61,15 @@ p {
 /* ── Cover Page ──────────────────────────────────────────── */
 
 .cover-page {
-  page: cover;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 297mm;
   text-align: center;
-  background: linear-gradient(160deg, var(--color-background) 0%, var(--color-white) 50%, var(--color-background) 100%);
+  background: var(--color-background, #F5F1E8);
   page-break-after: always;
+  padding: 20mm;
 }
 
 .cover-art {
@@ -134,18 +123,29 @@ p {
 
 .section {
   page-break-before: always;
+  position: relative;
+}
+
+.main-content-wrapper {
+  padding: 20mm;
+  position: relative;
+  z-index: 1;
 }
 
 .section-header {
-  background-color: var(--color-primary);
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
   color: var(--color-white);
-  padding: 8pt 14pt;
-  margin-bottom: 14pt;
-  border-radius: 3pt;
-  font-family: Georgia, "DejaVu Serif", serif;
-  font-size: 15pt;
-  letter-spacing: 0.3pt;
+  padding: 10pt 16pt;
+  margin-bottom: 16pt;
+  border-radius: 8pt;
+  font-family: "Quicksand", Georgia, "DejaVu Serif", serif;
+  font-size: 16pt;
+  letter-spacing: 0.4pt;
   page-break-after: avoid;
+  box-shadow: 0 2pt 8pt rgba(0,0,0,0.1);
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
 }
 
 .section-intro {
@@ -167,10 +167,11 @@ p {
 
 .overview-card {
   flex: 1 1 45%;
-  background: var(--color-background);
+  background: var(--color-white);
   border-left: 3pt solid var(--color-accent);
-  padding: 8pt 10pt;
-  border-radius: 0 3pt 3pt 0;
+  padding: 10pt 12pt;
+  border-radius: 0 6pt 6pt 0;
+  box-shadow: 0 1pt 4pt rgba(0,0,0,0.05);
 }
 
 .overview-card h4 {
@@ -217,25 +218,54 @@ p {
 /* ── Daily Activities ────────────────────────────────────── */
 
 .day-block {
-  margin-bottom: 16pt;
+  margin-bottom: 20pt;
+}
+
+.daily-banner-image {
+  display: none;
+}
+
+.page-bg-image {
+  position: absolute;
+  top: -5mm;
+  left: -5mm;
+  width: 220mm;
+  height: 310mm;
+  z-index: 0;
+  opacity: 0.15;
+  object-fit: cover;
+  display: block;
+}
+
+.content-overlay {
+  background: rgba(255, 255, 255, 0.85);
+  padding: 10mm;
+  border-radius: 20px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+  position: relative;
+  z-index: 1;
 }
 
 .day-header {
-  background: var(--color-secondary);
+  background: linear-gradient(135deg, var(--color-secondary) 0%, var(--color-primary) 100%);
   color: var(--color-white);
-  padding: 5pt 10pt;
-  border-radius: 3pt;
-  margin-bottom: 8pt;
+  padding: 8pt 14pt;
+  border-radius: 8pt;
+  margin-bottom: 6pt;
   display: flex;
   justify-content: space-between;
   align-items: center;
   page-break-after: avoid;
+  box-shadow: 0 2pt 8pt rgba(0,0,0,0.08);
+  position: relative;
+  z-index: 1;
 }
 
 .day-header h3 {
   color: var(--color-white);
   margin: 0;
-  font-family: Georgia, "DejaVu Serif", serif;
+  font-family: "Quicksand", Georgia, "DejaVu Serif", serif;
+  font-weight: 600;
 }
 
 .day-header .focus-domain {
@@ -246,11 +276,13 @@ p {
 }
 
 .activity-card {
-  background: var(--color-background);
-  border-radius: 3pt;
-  padding: 8pt 10pt;
+  background-color: rgba(255, 255, 255, 0.92);
+  border-radius: 8pt;
+  padding: 12pt 14pt;
   margin-bottom: 8pt;
-  page-break-inside: avoid;
+  box-shadow: 0 2pt 6pt rgba(0,0,0,0.08);
+  position: relative;
+  z-index: 1;
 }
 
 .activity-title {
@@ -352,7 +384,7 @@ p {
 .circle-item {
   flex: 1 1 22%;
   text-align: center;
-  background: var(--color-background);
+  background: rgba(255, 255, 255, 0.4);
   padding: 8pt 6pt;
   border-radius: 3pt;
 }
@@ -372,7 +404,7 @@ p {
 }
 
 .song-block {
-  background: var(--color-background);
+  background: rgba(255, 255, 255, 0.4);
   border-radius: 3pt;
   padding: 8pt 10pt;
   margin-bottom: 8pt;
@@ -424,7 +456,7 @@ p {
   display: flex;
   align-items: flex-start;
   gap: 12pt;
-  background: var(--color-background);
+  background: rgba(255, 255, 255, 0.4);
   border-radius: 3pt;
   padding: 8pt 10pt;
   margin-bottom: 10pt;
@@ -467,7 +499,7 @@ p {
 }
 
 .read-aloud-block, .discussion-block {
-  background: var(--color-background);
+  background: rgba(255, 255, 255, 0.4);
   padding: 8pt 10pt;
   border-radius: 3pt;
   margin-bottom: 8pt;
@@ -529,7 +561,7 @@ p {
 }
 
 .home-connection {
-  background: var(--color-background);
+  background: rgba(255, 255, 255, 0.4);
   border-left: 3pt solid var(--color-primary);
   padding: 8pt 10pt;
   border-radius: 0 3pt 3pt 0;

@@ -65,6 +65,7 @@ export interface WeekPlan {
     professional: string;
     warm: string;
   };
+  coverImageUrl?: string;
   generated: boolean;
 }
 

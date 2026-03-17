@@ -74,20 +74,26 @@ async def generate_plan(request: GeneratePlanRequest):
         logger.info("  error: %s", final_state.get("error"))
         logger.info("  iteration_count: %s", final_state.get("iteration_count"))
 
-        if final_state.get("error"):
-            raise HTTPException(
-                status_code=500,
-                detail=final_state["error"],
-            )
-
         # Prefer personalized plan; fall back to draft if auditor
         # rejected after max iterations (plan is still usable).
         plan = final_state.get("personalized_plan") or final_state.get("draft_plan")
 
         if not plan:
+            # Surface the real upstream error (architect/auditor failure)
+            # rather than the generic save-node message.
+            real_error = final_state.get("error") or "Pipeline produced no usable plan."
+            logger.error("Pipeline failed — no plan in state. error=%s", real_error)
             raise HTTPException(
                 status_code=500,
-                detail="Pipeline produced no usable plan.",
+                detail=real_error,
+            )
+
+        # Plan exists — return it. Log any non-critical pipeline error
+        # (e.g. DB save failure) but don't block the user.
+        if final_state.get("error"):
+            logger.warning(
+                "Pipeline completed with non-fatal error: %s",
+                final_state["error"],
             )
 
         return {
@@ -145,7 +151,7 @@ async def download_plan_pdf(user_id: str, week_number: int):
     }
 
     try:
-        pdf_bytes = generate_weekly_pdf(curriculum_data)
+        pdf_bytes = await generate_weekly_pdf(curriculum_data)
     except Exception as e:
         logger.error("PDF generation failed: %s", e)
         raise HTTPException(

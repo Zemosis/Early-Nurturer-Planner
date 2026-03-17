@@ -223,6 +223,7 @@ export function transformApiPlanToWeekPlan(api: any): WeekPlan {
       professional: api.newsletter?.professional_version ?? "",
       warm: api.newsletter?.warm_version ?? "",
     },
+    coverImageUrl: api.cover_image_url ?? undefined,
     generated: true,
   };
 }

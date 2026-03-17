@@ -46,7 +46,6 @@ def _upload_bytes_to_gcs(image_bytes: bytes, blob_name: str) -> str:
     bucket = client.bucket(settings.GCS_BUCKET_NAME)
     blob = bucket.blob(blob_name)
     blob.upload_from_string(image_bytes, content_type="image/png")
-    blob.make_public()
     public_url = f"https://storage.googleapis.com/{settings.GCS_BUCKET_NAME}/{blob_name}"
     logger.info("Uploaded cover image to %s", public_url)
     return public_url
@@ -73,13 +72,18 @@ async def get_or_generate_cover_image(plan_row: WeeklyPlan) -> str | None:
     Returns:
         The public GCS URL to the cover image, or None if generation failed.
     """
-    # ── 1. Return cached URL if it already exists ────────────
+    theme = plan_row.theme or "Weekly Theme"
+    sanitized_theme = theme.lower().replace(" ", "_")
+
+    # ── 1. Return cached URL if it matches the current theme ──
     existing_url = getattr(plan_row, "cover_image_url", None)
-    if existing_url:
-        logger.info("Cover image already cached: %s", existing_url)
+    if existing_url and sanitized_theme in existing_url:
+        logger.info("Cover image already cached (theme match): %s", existing_url)
         return existing_url
 
-    theme = plan_row.theme or "Weekly Theme"
+    if existing_url:
+        logger.info("Cached cover image does not match theme '%s', regenerating...", theme)
+
     prompt = _build_prompt(theme)
     logger.info("Generating cover image for theme '%s'...", theme)
 
@@ -110,7 +114,7 @@ async def get_or_generate_cover_image(plan_row: WeeklyPlan) -> str | None:
         return None
 
     # ── 3. Upload to GCS ─────────────────────────────────────
-    blob_name = f"{GCS_FOLDER}/{plan_row.id}.png"
+    blob_name = f"{GCS_FOLDER}/{plan_row.id}_{sanitized_theme}.png"
     try:
         public_url = _upload_bytes_to_gcs(image_bytes, blob_name)
     except Exception as e:
@@ -123,5 +127,62 @@ async def get_or_generate_cover_image(plan_row: WeeklyPlan) -> str | None:
     except Exception as e:
         logger.error("Failed to save cover_image_url to DB: %s", e, exc_info=True)
         # Still return the URL — the image exists on GCS even if DB save fails
+
+    return public_url
+
+
+async def get_or_generate_daily_image(theme: str, day_name: str, day_summary: str) -> str | None:
+    """Generate a portrait-aspect-ratio daily theme illustration via Imagen.
+
+    Args:
+        theme: The weekly theme (e.g., "Gentle Rain")
+        day_name: Day of the week (e.g., "Monday")
+        day_summary: Brief summary of the day's focus
+
+    Returns:
+        The public GCS URL to the daily image, or None if generation failed.
+    """
+    prompt = (
+        f"A beautiful, tall portrait watercolor illustration for a preschool "
+        f"classroom activity on {day_name}, themed around {theme}. "
+        f"Focus: {day_summary}. Soft pastel colors, child-friendly, "
+        f"no text, clean background, suitable for 0-3 year olds."
+    )
+    logger.info("Generating daily image for %s (%s)...", day_name, theme)
+
+    try:
+        response = _genai_client.models.generate_images(
+            model=IMAGEN_MODEL,
+            prompt=prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+                aspect_ratio="3:4",
+                person_generation="dont_allow",
+            ),
+        )
+    except Exception as e:
+        logger.error("Imagen API failed for daily image: %s", e, exc_info=True)
+        return None
+
+    if not response.generated_images:
+        logger.warning("Imagen returned no images for %s", day_name)
+        return None
+
+    generated = response.generated_images[0]
+    image_bytes = generated.image.image_bytes
+    if not image_bytes:
+        logger.warning("Imagen returned empty image bytes for %s", day_name)
+        return None
+
+    # Upload to GCS with a unique name
+    safe_day = day_name.lower().replace(" ", "-")
+    safe_theme = theme.lower().replace(" ", "-")[:30]
+    blob_name = f"{GCS_FOLDER}/daily_{safe_theme}_{safe_day}_{uuid.uuid4().hex[:8]}.png"
+    
+    try:
+        public_url = _upload_bytes_to_gcs(image_bytes, blob_name)
+    except Exception as e:
+        logger.error("GCS upload failed for daily image: %s", e, exc_info=True)
+        return None
 
     return public_url

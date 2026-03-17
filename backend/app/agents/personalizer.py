@@ -84,17 +84,18 @@ async def personalize_plan(state: PlannerState) -> dict:
     # ── Guard: no plan to personalise ─────────────────────────
     if not draft_plan:
         logger.warning("Personalizer: no draft_plan provided")
+        # Preserve any upstream error already in state rather than overwriting
         return {
             "personalized_plan": None,
-            "error": "No draft plan available to personalize.",
         }
 
     # ── Guard: plan was not accepted by auditor ───────────────
     if audit_result and not audit_result.get("accepted", False):
         logger.warning("Personalizer: plan was rejected by auditor, skipping personalization (draft plan will be used as fallback)")
+        # Return only personalized_plan=None; do NOT overwrite error so the
+        # upstream failure reason is preserved in state.
         return {
             "personalized_plan": None,
-            "error": None,
         }
 
     # ── Serialize plan for the prompt (compact to reduce tokens) ──

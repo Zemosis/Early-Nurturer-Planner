@@ -12,7 +12,23 @@ export interface PDFMetadata {
   weekDates: string;
 }
 
-export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): jsPDF {
+async function fetchImageAsBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): Promise<jsPDF> {
   const pdf = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -24,9 +40,45 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
   const margin = 20;
   const contentWidth = pageWidth - (margin * 2);
 
+  // Theme colors — page bg is darker, overlays are brighter for contrast
+  const bgColor = { r: 220, g: 216, b: 208 }; // ~10% darker than #F5F1E8
+  const overlayAlpha = 0.85;
+
+  // Fetch cover/background image once for reuse across all pages
+  let pageBackgroundData: string | null = null;
+  if (week.coverImageUrl) {
+    pageBackgroundData = await fetchImageAsBase64(week.coverImageUrl);
+  }
+
+  // Helper: fill page with bg color + optional AI image at 0.15 opacity
+  const drawPageBackground = (imageData: string | null = pageBackgroundData) => {
+    pdf.setFillColor(bgColor.r, bgColor.g, bgColor.b);
+    pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+    if (imageData) {
+      pdf.setGState(pdf.GState({ opacity: 0.25 }));
+      pdf.addImage(imageData, 'PNG', -5, -5, pageWidth + 10, pageHeight + 10);
+      pdf.setGState(pdf.GState({ opacity: 1 }));
+    }
+  };
+
+  // Helper: draw frosted glass overlay box
+  const drawOverlayBox = (x: number, y: number, w: number, h: number) => {
+    pdf.setGState(pdf.GState({ opacity: overlayAlpha }));
+    pdf.setFillColor(255, 255, 255);
+    pdf.roundedRect(x, y, w, h, 5, 5, 'F');
+    pdf.setGState(pdf.GState({ opacity: 1 }));
+  };
+
+  // Helper: fill cover page with lighter theme color (no image overlay)
+  const fillCoverBackground = () => {
+    pdf.setFillColor(245, 241, 232); // #F5F1E8 — lighter for cover
+    pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+  };
+
   // Helper functions
   const addNewPage = () => {
     pdf.addPage();
+    drawPageBackground();
     return margin; // Reset Y position
   };
 
@@ -67,23 +119,34 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
     return y + (lines.length * 4.5);
   };
 
-  // Cover Page
-  let y = 80;
-  
+  // ── Cover Page ─────────────────────────────────────────
+  fillCoverBackground();
+
+  let y = 50;
+  if (pageBackgroundData) {
+    const imgWidth = 120;
+    const imgHeight = imgWidth * 0.75;
+    const imgX = (pageWidth - imgWidth) / 2;
+    // Frosted glass frame behind image
+    drawOverlayBox(imgX - 5, y - 5, imgWidth + 10, imgHeight + 10);
+    pdf.addImage(pageBackgroundData, 'PNG', imgX, y, imgWidth, imgHeight);
+    y += imgHeight + 20;
+  } else {
+    y = 100;
+  }
+
   // Title
-  pdf.setFillColor(246, 233, 107); // Highlight color
-  pdf.rect(0, y - 10, pageWidth, 40, 'F');
   pdf.setTextColor(56, 127, 57);
   pdf.setFontSize(28);
   pdf.setFont('helvetica', 'bold');
-  pdf.text(week.theme.toUpperCase(), pageWidth / 2, y + 5, { align: 'center' });
+  pdf.text(week.theme.toUpperCase(), pageWidth / 2, y, { align: 'center' });
   
-  y += 20;
+  y += 15;
   pdf.setFontSize(14);
   pdf.setFont('helvetica', 'normal');
   pdf.text('Weekly Curriculum Plan', pageWidth / 2, y, { align: 'center' });
   
-  y += 40;
+  y += 25;
   pdf.setTextColor(80, 80, 80);
   pdf.setFontSize(11);
   pdf.text(`Week ${week.weekNumber} • ${metadata.weekDates}`, pageWidth / 2, y, { align: 'center' });
@@ -100,17 +163,22 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
   // Page 1: Weekly Theme Overview
   y = addNewPage();
   y = drawHeader('Weekly Theme Overview', y);
-  y += 10;
-  
+  y += 5;
+
+  // Frosted glass overlay for content
+  const overviewBoxY = y;
+  drawOverlayBox(margin, overviewBoxY, contentWidth, 100);
+  y += 8;
+
   y = drawSubheader('Theme Focus', y);
   y = drawBodyText(`This week we explore "${week.theme}" across multiple developmental domains.`, y);
-  y += 8;
+  y += 6;
   
   y = drawSubheader('Developmental Domains', y);
   week.objectives.slice(0, 3).forEach((obj: { domain: string; goal: string }) => {
     y = drawBulletPoint(`${obj.domain}: ${obj.goal}`, y);
   });
-  y += 8;
+  y += 6;
   
   y = drawSubheader('Learning Goals', y);
   const goals = [
@@ -126,7 +194,7 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
   // Pages 2-3: Daily Activities
   y = addNewPage();
   y = drawHeader('Daily Activities Schedule', y);
-  y += 10;
+  y += 5;
 
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
   week.activities.slice(0, 5).forEach((activity, index) => {
@@ -134,15 +202,18 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
       y = addNewPage();
     }
 
+    // Activity card overlay
+    drawOverlayBox(margin, y - 2, contentWidth, 55);
+
     y = drawSubheader(`${days[index]} – ${activity.title}`, y);
     y = drawBodyText(activity.description, y);
-    y += 5;
+    y += 3;
     
     // Age adaptations
     pdf.setFontSize(8);
     pdf.setFont('helvetica', 'italic');
     pdf.setTextColor(100, 100, 100);
-    pdf.text('Age Adaptations:', margin, y);
+    pdf.text('Age Adaptations:', margin + 3, y);
     y += 4;
     
     pdf.setFont('helvetica', 'normal');
@@ -154,13 +225,14 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
       pdf.text(lines, margin + 5, y);
       y += lines.length * 3.5;
     });
-    y += 8;
+    y += 6;
   });
 
   // Page 4: Circle Time Overview
   y = addNewPage();
   y = drawHeader('Circle Time Overview', y);
-  y += 10;
+  y += 5;
+  drawOverlayBox(margin, y - 2, contentWidth, 130);
   
   y = drawSubheader('Daily Learning Elements', y);
   y = drawBulletPoint(`Letter of the Week: ${week.circleTime.letter}`, y);
@@ -189,7 +261,8 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
   // Page 5: Materials List
   y = addNewPage();
   y = drawHeader('Materials & Supplies Checklist', y);
-  y += 10;
+  y += 5;
+  drawOverlayBox(margin, y - 2, contentWidth, 120);
   
   const allMaterials = new Set<string>();
   week.activities.forEach(activity => {
@@ -210,7 +283,8 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
   // Page 6: Parent Newsletter Summary
   y = addNewPage();
   y = drawHeader('Parent Newsletter Summary', y);
-  y += 10;
+  y += 5;
+  drawOverlayBox(margin, y - 2, contentWidth, 140);
   
   y = drawSubheader('This Week in Class', y);
   y = drawBodyText(`This week we're exploring the theme "${week.theme}". Children will engage in hands-on, sensory-rich activities across multiple developmental domains.`, y);
@@ -237,7 +311,8 @@ export function generateCurriculumPDF(week: WeekPlan, metadata: PDFMetadata): js
   // Page 7: Documentation Checklist
   y = addNewPage();
   y = drawHeader('Documentation & Observation Checklist', y);
-  y += 10;
+  y += 5;
+  drawOverlayBox(margin, y - 2, contentWidth, 120);
   
   y = drawSubheader('Developmental Observations', y);
   const observations = [
