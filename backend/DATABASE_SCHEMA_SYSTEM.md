@@ -54,6 +54,11 @@ FastAPI / LangGraph nodes
 │ vector_store_curriculum   │    │     yoga_poses        │
 │   (RAG chunks, 768d)     │    │  (pose catalog, 768d) │
 └──────────────────────────┘    └──────────────────────┘
+
+┌──────────┐
+│  users   │──1:N──┌──────────────┐
+│          │       │  theme_pool  │  (persistent pre-generated theme cache)
+└──────────┘       └──────────────┘
 ```
 
 ---
@@ -147,6 +152,26 @@ Generated curriculum plans — stores the full plan payload as JSONB.
 - Week 1 = this week (Monday-Friday), Week 2 = next week, etc.
 - Server recomputes `year`, `month`, `week_of_month`, `week_range` on every write (generate, reorder, delete)
 - Ensures chronological consistency regardless of when plans were created
+
+---
+
+### `theme_pool`
+
+Persistent pool of pre-generated AI theme options per user. Decouples theme browsing from plan generation — themes are stored ready to serve, auto-refilled to 5 when consumed.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | PK, default uuid4 | Pool entry ID |
+| `user_id` | UUID | FK → users.id, CASCADE | Educator |
+| `theme_data` | JSONB | NOT NULL | Full `ThemeSchema` dict as returned by AI |
+| `is_used` | BOOLEAN | default false, NOT NULL | `True` once a plan has been generated from this theme |
+| `created_at` | TIMESTAMPTZ | server_default now() | |
+
+**Index:** `ix_theme_pool_user_active` on `(user_id, is_used)` — fast active-pool lookup
+
+**Pool invariant:** Each user always has up to 5 rows with `is_used=False`. When a theme is consumed (`is_used=True`), the next `GET /api/theme-pool/{user_id}` auto-generates a replacement.
+
+**Migration:** `2026_03_17_b2c3d4e5f6a7_add_theme_pool_and_weekly_plan_calendar.py`
 
 ---
 
@@ -291,6 +316,18 @@ Yoga pose catalog extracted from the "Yoga for the Classroom" PDF. Each pose has
 - Async runner: `alembic/env.py` uses `async_engine_from_config` + `asyncio.run()`
 - Template: `script.py.mako` pre-imports `pgvector.sqlalchemy.Vector`
 - Initial migration: `2026_03_09_5f368ee0298a_initial_schema_with_pgvector.py`
+
+### Migration History (key milestones)
+
+| Migration ID | Description |
+|---|---|
+| `5f368ee0298a` | Initial schema — all core tables + pgvector |
+| `023b423663bf` | Unique constraint on `(user_id, week_number)` for weekly_plans |
+| `f8a2b1c3d4e5` | Composite index on `students(user_id, is_active)` |
+| `e375332db6a6` | Add `yoga_poses` table |
+| `c3d4e5f6a7b8` | Add `pdf_url` column to `weekly_plans` |
+| `d4e5f6a7b8c9` | Swap unique constraint to `(user_id, week_number)`; add `year`, `month`, `week_of_month` columns |
+| `b2c3d4e5f6a7` | Add `theme_pool` table + calendar columns to `weekly_plans` |
 
 ```bash
 # Apply migrations

@@ -30,7 +30,7 @@ START
     ┌────┴────┐
     │         │
  rejected   accepted
- (& iter<3)  (or iter≥3)
+ (& iter<2)  (or iter≥2)
     │         │
     ▼         ▼
   architect  ┌─────────────────┐
@@ -72,7 +72,7 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 | `draft_plan` | `dict\|None` | architect | WeekPlanSchema as dict |
 | `audit_result` | `dict\|None` | auditor | AuditResultSchema as dict |
 | `personalized_plan` | `dict\|None` | personalizer | Final personalized plan |
-| `iteration_count` | `int` | architect | Incremented each pass (max 3) |
+| `iteration_count` | `int` | architect | Incremented each pass (max 2) |
 | `error` | `str\|None` | Any node | Error message on failure |
 
 ---
@@ -99,9 +99,9 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 
 **Gemini Config:**
 - Model: `gemini-2.5-flash`
-- Temperature: `0.9` (creative)
+- Temperature: `0.7` (creative but focused)
 - Response schema: `WeekPlanSchema`
-- Max output tokens: `65,536`
+- Max output tokens: `24,576`
 
 **Key behaviors:**
 - First pass: Generates fresh plan from theme + student context + pedagogy
@@ -165,7 +165,7 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 - Model: `gemini-2.5-flash`
 - Temperature: `0.5` (balanced)
 - Response schema: `WeekPlanSchema`
-- Max output tokens: `65,536`
+- Max output tokens: `24,576`
 
 **MAY change:**
 - Activity `description` — mention children by name
@@ -238,18 +238,20 @@ All nodes read from and write to a single `PlannerState` TypedDict. Each node re
 **Purpose:** Conditional edge that decides whether to revise or proceed.
 
 **Returns:**
-- `"personalize"` → routes to personalizer if accepted, iteration cap (≥2) reached, or error present
-- `"revise"` → if rejected and iterations remain
+- `"personalize"` → routes to personalizer if `accepted=True`, `iteration_count >= 2`, or error present
+- `"revise"` → if rejected and `iteration_count < 2`
+
+**Cap:** 1 revision maximum — the Architect gets one retry, then the plan is force-accepted regardless of audit result.
 
 ---
 
 ## Temperature Strategy
 
-| Agent | Model | Temperature | Rationale |
-|---|---|---|---|
-| Architect | `gemini-2.5-flash` | 0.9 | Creative generation, self-checks safety via built-in checklist |
-| Auditor | `gemini-2.5-flash` | 0.3 | Deterministic pass/fail eval with relaxed thresholds |
-| Personalizer | `gemini-2.5-flash` | 0.5 | Balanced — creative for child references, stable structure |
+| Agent | Model | Temperature | Max Tokens | Rationale |
+|---|---|---|---|---|
+| Architect | `gemini-2.5-flash` | 0.7 | 24,576 | Creative but focused; 0.9→0.7 reduces token waste from exploratory reasoning |
+| Auditor | `gemini-2.5-flash` | 0.3 | — | Deterministic pass/fail eval with relaxed thresholds |
+| Personalizer | `gemini-2.5-flash` | 0.5 | 24,576 | Balanced — creative for child references, stable structure |
 
 ---
 
@@ -263,7 +265,7 @@ All three Gemini-calling agents use `response_schema` with Pydantic models. This
 
 ## Error Resilience
 
-- **Iteration cap:** Max 2 Architect passes before force-accepting
+- **Iteration cap:** Max 2 Architect passes (1 original + 1 revision) before force-accepting
 - **Error routing:** `route_auditor` checks for errors and routes forward to avoid infinite loops
 - **Fallback chain:** `personalized_plan` → `draft_plan` → error
 - **Surrogate sanitizer:** Regex strips Gemini's invalid Unicode surrogate escapes before Pydantic validation
@@ -307,6 +309,80 @@ All three Gemini-calling agents use `response_schema` with Pydantic models. This
 | `search_youtube_video(query, video_category_id?)` | Search YouTube API (5 results), prefer trusted channels, return metadata dict |
 | `_parse_iso8601_duration(iso)` | Convert `PT3M8S` → `("3:08", 188)` |
 | `_clean_youtube_title(raw)` | Strip hashtags, HTML entities, Unicode junk, channel suffixes |
+
+---
+
+## Theme Pool System (`app/api/routers/theme_pool.py`)
+
+The theme pool is a **persistent, lazy-refilled** cache of 5 AI-generated themes per user. It decouples theme generation from plan generation — themes are pre-generated and stored, so the user sees options instantly without waiting for AI.
+
+### How It Works
+
+```
+Frontend opens GenerateWeekModal
+         │
+         ▼
+  GET /api/theme-pool/{user_id}
+         │
+         ▼
+  ┌──────────────────────────────────────────┐
+  │  Count active (is_used=False) themes      │
+  │  missing = 5 - count                     │
+  │  if missing > 0: generate + insert        │
+  └──────────────────────────────────────────┘
+         │
+         ▼
+  Return up to 5 ThemePoolItems {id, theme_data}
+         │
+         ▼
+  User selects a theme → POST /api/planner/generate
+  { selected_theme: {...}, theme_pool_id: "uuid" }
+         │
+         ▼
+  planner marks pool row is_used=True
+  (pool drops to 4 active; next GET auto-refills)
+```
+
+### Pool Size
+- Always maintained at **5 active** (`is_used=False`) themes per user
+- `POOL_SIZE = 5` constant in `theme_pool.py`
+
+### Endpoints
+
+**`GET /api/theme-pool/{user_id}`**
+- Returns current active pool (up to 5)
+- Auto-generates missing themes to fill to 5 on every request
+- First-time users get 5 freshly generated themes
+
+**`POST /api/theme-pool/{user_id}/refresh`**
+- Request body: `{ keep_ids: ["uuid", ...] }`
+- Marks all themes NOT in `keep_ids` as `is_used=True` (discards them)
+- Generates replacements to refill pool back to 5
+- Used by the "Shuffle" button in `GenerateWeekModal`
+
+### Theme Used Lifecycle
+
+When a user generates a plan:
+1. `POST /api/planner/generate` receives `theme_pool_id` in the request body
+2. The matching `ThemePool` row is set to `is_used=True`
+3. On the next `GET /api/theme-pool/{user_id}`, the pool auto-generates 1 replacement
+4. The pool is always ready with 5 fresh options
+
+### Data Model
+
+```python
+ThemePool(
+    id=uuid,
+    user_id=uuid,          # FK → users.id
+    theme_data=JSONB,      # Full ThemeSchema dict
+    is_used=bool,          # False = available, True = consumed
+    created_at=TIMESTAMPTZ
+)
+```
+
+**Index:** `ix_theme_pool_user_active` on `(user_id, is_used)` — fast active pool lookup
+
+**Migration:** `2026_03_17_b2c3d4e5f6a7_add_theme_pool_and_weekly_plan_calendar.py`
 
 ---
 
@@ -356,3 +432,68 @@ All three Gemini-calling agents use `response_schema` with Pydantic models. This
 - **Total time reduction:** 32 seconds (22% improvement)
 - **New target:** 115 seconds (down from 147s)
 - **Infrastructure:** Cloud Run upgraded to 2 GiB memory, 2 vCPU, min-instances 1, no CPU throttling (eliminates cold starts, adds ~15s savings)
+
+---
+
+## PDF Generation & Caching System (`app/services/pdf_service.py`)
+
+PDFs are generated **on-demand** (not during plan creation) and cached in GCS. The `pdf_url` column on `weekly_plans` holds the public GCS URL once generated.
+
+### PDF Flow
+
+```
+Frontend: user clicks Download PDF
+         │
+         ▼
+  GET /api/planner/{user_id}/plan/{plan_id}/pdf
+         │
+         ▼
+  ┌─ pdf_url cached? ──────────────────────────┐
+  │  YES → proxy GCS URL through backend       │
+  │        (avoids CORS on direct GCS access)  │
+  │        → StreamingResponse (PDF bytes)     │
+  │                                            │
+  │  NO  → get_or_generate_cover_image()       │
+  │        → generate_weekly_pdf(data)         │
+  │        → upload_pdf_to_gcs(bytes, plan_id) │
+  │        → save_pdf_url(plan_id, gcs_url)    │
+  │        → StreamingResponse (PDF bytes)     │
+  └────────────────────────────────────────────┘
+```
+
+### Service Functions (`pdf_service.py`)
+
+| Function | Description |
+|---|---|
+| `generate_weekly_pdf(curriculum_data)` | Renders Jinja2 HTML template → PDF via WeasyPrint. Returns `bytes`. |
+| `upload_pdf_to_gcs(pdf_bytes, plan_uid, theme)` | Uploads to GCS bucket at `weekly-plans/{plan_id}.pdf`, makes public, returns URL. |
+| `save_pdf_url(plan_uid, gcs_url)` | Updates `weekly_plans.pdf_url` column in DB. |
+| `delete_pdf_from_gcs(pdf_url)` | Deletes blob from GCS by URL (used during regeneration). |
+
+### PDF Endpoints
+
+**`GET /{user_id}/plan/{plan_id}/pdf`** — Primary download (cache-aware)
+- If `pdf_url` is set: proxies GCS content through the backend (bypasses CORS)
+- If not cached: generates → uploads → caches → serves
+- Falls through to regeneration if the GCS fetch fails
+
+**`POST /{user_id}/plan/{plan_id}/pdf/regenerate`** — Force regenerate
+- Deletes old GCS blob
+- Regenerates PDF with current plan data + fresh cover image
+- Uploads new PDF, updates `pdf_url` in DB
+- Streams new PDF bytes
+
+**`GET /{user_id}/week/{week_number}/pdf`** — Legacy endpoint (by week number)
+- Generates on-the-fly, no caching
+- Kept for backward compatibility
+
+### GCS Paths
+- PDFs: `weekly-plans/{plan_uuid}.pdf`
+- Cover images: managed by `image_service.py`
+- Public URL format: `https://storage.googleapis.com/{bucket}/weekly-plans/{plan_uuid}.pdf`
+
+### Cover Images (`app/services/image_service.py`)
+- `get_or_generate_cover_image(plan_row)` — called before every PDF render
+- If `cover_image_url` is set on the plan: returns it directly
+- If not: generates via Vertex AI Imagen, uploads to GCS, saves URL to DB
+- Cover image is embedded in the PDF header page

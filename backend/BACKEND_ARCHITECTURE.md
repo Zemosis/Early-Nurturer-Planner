@@ -42,8 +42,9 @@ backend/
 │   │   ├── __init__.py
 │   │   └── routers/
 │   │       ├── __init__.py
-│   │       ├── themes.py            # POST /api/themes/generate
-│   │       └── planner.py           # POST /api/planner/generate
+│   │       ├── themes.py            # POST /api/themes/generate (legacy)
+│   │       ├── theme_pool.py        # GET /api/theme-pool/{user_id}, POST /refresh
+│   │       └── planner.py           # Plan generation, CRUD, PDF, reorder, delete
 │   │
 │   ├── agents/                      # ── LangGraph AI Pipeline ──
 │   │   ├── __init__.py
@@ -55,6 +56,10 @@ backend/
 │   │   ├── personalizer.py          # Personalizer node
 │   │   ├── youtube_enricher.py      # YouTube video enrichment node
 │   │   └── graph.py                 # Graph wiring, save node, routing logic
+│   │
+│   ├── services/                    # ── Business Logic Services ──
+│   │   ├── pdf_service.py           # WeasyPrint PDF generation + GCS upload/cache
+│   │   └── image_service.py         # Vertex AI cover image generation + GCS
 │   │
 │   └── db/                          # ── Database Layer ──
 │       ├── __init__.py
@@ -69,6 +74,7 @@ backend/
 └── scripts/                         # ── Dev Utilities ──
     ├── gcp-phase1-setup.sh          # GCP provisioning (Cloud SQL, SA keys)
     ├── seed_db.py                   # Insert mock users/students/embeddings
+    ├── seed_yoga_catalog.py         # Seed yoga pose catalog from PDF + GCS
     └── update-db-ip.sh              # Whitelist current IP on Cloud SQL
 ```
 
@@ -95,25 +101,37 @@ Settings are loaded from `backend/.env` via `pydantic-settings`. The `Settings` 
 
 ## API Endpoints
 
-### `POST /api/themes/generate`
-**Router:** `app/api/routers/themes.py`
+### `GET /api/theme-pool/{user_id}`
+**Router:** `app/api/routers/theme_pool.py`
 
-Generates AI-powered weekly theme options for an educator's classroom.
+Returns the user's active theme pool (up to 5). Auto-generates replacements if fewer than 5 active themes exist. First-time users get 5 freshly generated themes.
 
-**Request:**
-```json
-{
-  "user_id": "83b58b5f-698b-4ae1-9529-f83d97641f01",
-  "theme_count": 5
-}
-```
+**Response:** Array of `{ id, theme_data }` objects.
+
+---
+
+### `POST /api/theme-pool/{user_id}/refresh`
+**Router:** `app/api/routers/theme_pool.py`
+
+Discards non-kept themes and generates replacements ("Shuffle" button).
+
+**Request:** `{ "keep_ids": ["uuid", ...] }`
 
 **Flow:**
-1. `fetch_student_context(user_id)` → queries enrolled students from DB
-2. `generate_theme_options(student_context, count)` → calls Gemini with `ThemeSchema` structured output
-3. Returns list of theme dicts
+1. Marks all themes NOT in `keep_ids` as `is_used=True`
+2. Generates new themes to bring pool back to 5
+3. Returns updated pool
 
-**Response:** Array of `ThemeSchema` objects (palette, circle time, activities, environment).
+---
+
+### `POST /api/themes/generate`
+**Router:** `app/api/routers/themes.py` *(legacy — use theme-pool instead)*
+
+Generates AI-powered theme options on-demand without pool persistence.
+
+**Request:** `{ "user_id": "...", "theme_count": 5 }`
+
+**Response:** Array of `ThemeSchema` objects.
 
 ---
 
@@ -127,24 +145,32 @@ Triggers the full multi-agent LangGraph pipeline.
 {
   "user_id": "83b58b5f-...",
   "selected_theme": { "name": "Fox Forest", ... },
-  "week_number": 1,
-  "week_range": "3/10 - 3/14"
+  "theme_pool_id": "uuid-of-pool-entry"  // optional — marks pool theme as used
 }
 ```
 
 **Flow:**
-1. Compiles LangGraph via `build_planner_graph()`
-2. Invokes with initial state
-3. Pipeline: `fetch_context → architect → auditor → (revise loop) → personalizer → youtube_enricher → save`
-4. Returns `personalized_plan` or falls back to `draft_plan`
+1. Counts existing user plans → `week_number = count + 1`
+2. Computes `week_range`, `year`, `month`, `week_of_month` from `today + (week_number - 1) weeks`
+3. Marks `theme_pool_id` as `is_used=True` (if provided)
+4. Compiles and invokes LangGraph: `fetch_context → architect → auditor → (1 revision max) → personalizer → youtube_enricher → save`
+5. Returns `personalized_plan` or falls back to `draft_plan`
 
 **Response:**
 ```json
 {
   "status": "success",
-  "plan": { /* WeekPlanSchema */ }
+  "plan": { /* WeekPlanSchema */ },
+  "plan_id": "uuid"
 }
 ```
+
+---
+
+### `GET /api/planner/{user_id}/plan/{plan_id}`
+**Router:** `app/api/routers/planner.py`
+
+Fetch a full plan by UUID. Returns all fields including `daily_plans` (activities grouped by day via `_rebuild_daily_plans()`), `cover_image_url`, and `pdf_url`.
 
 ---
 
@@ -196,7 +222,41 @@ Reorders plans to match the client-supplied sequence of plan IDs. Server recompu
    - Phase 2: Assign sequential `week_number = 1, 2, 3...` based on position
 3. Recomputes `year`, `month`, `week_of_month`, `week_range` via `_compute_week_info(today + (N-1) weeks)`
 
-**Response:** Updated list of plans (same format as `GET /plans`)
+**Response:** Updated list of plans ordered by `week_number` ascending.
+
+---
+
+### `GET /api/planner/{user_id}/plan/{plan_id}/pdf`
+**Router:** `app/api/routers/planner.py`
+
+Primary PDF download endpoint with GCS caching.
+
+**Flow:**
+- If `pdf_url` cached: proxies GCS content through backend (avoids CORS on direct GCS access)
+- If not cached: generates via WeasyPrint, uploads to GCS at `weekly-plans/{plan_id}.pdf`, saves URL to DB, streams bytes
+- Falls through to regeneration if the GCS fetch fails
+
+**Response:** `StreamingResponse` with `Content-Disposition: attachment`
+
+---
+
+### `POST /api/planner/{user_id}/plan/{plan_id}/pdf/regenerate`
+**Router:** `app/api/routers/planner.py`
+
+Force-regenerates the PDF (bypasses cache).
+
+**Flow:**
+1. Deletes existing GCS blob (if any)
+2. Regenerates PDF with current plan data + fresh cover image
+3. Uploads to GCS, updates `pdf_url` in DB
+4. Streams new PDF bytes
+
+---
+
+### `GET /api/planner/{user_id}/week/{week_number}/pdf`
+**Router:** `app/api/routers/planner.py` *(legacy — no caching)*
+
+Generates a PDF on-the-fly by week number. No GCS upload or `pdf_url` caching. Kept for backward compatibility.
 
 ---
 
