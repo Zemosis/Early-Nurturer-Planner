@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Shape Poster - {{ shape_name }}</title>
+    <style>
+        @page { size: letter portrait; margin: 0; }
+        body { margin: 0; padding: 0; width: 8.5in; height: 11in; background: #fff; }
+        .svg-container { width: 100%; height: 100%; display: block; }
+        .svg-container svg { width: 100%; height: 100%; display: block; }
+    </style>
+</head>
+<body>
+    <div class="svg-container">
+        {{ svg_content | safe }}
+    </div>
+</body>
+</html>

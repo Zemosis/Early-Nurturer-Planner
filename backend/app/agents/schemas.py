@@ -443,6 +443,22 @@ class CircleTimeSchema(BaseModel):
         ...,
         description="Number the class is counting up to this week (1–20).",
     )
+    letter_word: str = Field(
+        ...,
+        description="A single thematic word that starts with the letter of the week "
+                    "(e.g. 'Acorn' for letter A with a forest theme). Used on the alphabet poster.",
+    )
+    counting_object: str = Field(
+        ...,
+        description="A thematic object used for the counting poster "
+                    "(e.g. 'caterpillars' for a garden theme). Always plural, lowercase.",
+    )
+    color_object: str = Field(
+        ...,
+        description="A thematic object that is naturally or clearly the color of the week "
+                    "(e.g. 'green frog' for green, 'red ladybug' for red). "
+                    "Used on the color poster. Lowercase, 1-3 words.",
+    )
     greeting_song: SongSchema = Field(
         ...,
         description="Theme-flavored greeting song to open circle time.",

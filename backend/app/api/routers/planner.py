@@ -21,6 +21,7 @@ from app.agents.graph import build_planner_graph
 from app.db.database import async_session_factory
 from app.db.models import WeeklyPlan, ThemePool
 from app.services.image_service import get_or_generate_cover_image
+from app.services.material_service import get_or_generate_material, VALID_MATERIAL_TYPES
 from app.services.pdf_service import generate_weekly_pdf, upload_pdf_to_gcs, save_pdf_url, delete_pdf_from_gcs
 
 logger = logging.getLogger(__name__)
@@ -375,6 +376,24 @@ async def delete_plan(user_id: str, plan_id: str):
         if not plan_row:
             raise HTTPException(status_code=404, detail="Plan not found.")
 
+        # Clean up GCS assets before deleting DB row
+        if plan_row.pdf_url:
+            try:
+                delete_pdf_from_gcs(plan_row.pdf_url)
+            except Exception as e:
+                logger.warning("Failed to delete curriculum PDF from GCS: %s", e)
+        if plan_row.cover_image_url:
+            try:
+                delete_pdf_from_gcs(plan_row.cover_image_url)
+            except Exception as e:
+                logger.warning("Failed to delete cover image from GCS: %s", e)
+        for url in (plan_row.material_urls or {}).values():
+            if url:
+                try:
+                    delete_pdf_from_gcs(url)
+                except Exception as e:
+                    logger.warning("Failed to delete material PDF from GCS: %s", e)
+
         # Delete it
         await session.delete(plan_row)
         await session.flush()
@@ -625,6 +644,58 @@ async def regenerate_plan_pdf(user_id: str, plan_id: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/{user_id}/plan/{plan_id}/material/{material_type}")
+async def get_material_poster(user_id: str, plan_id: str, material_type: str):
+    """Generate or retrieve a themed material poster PDF.
+
+    On first call, generates the PDF (may take 10–30 s for Imagen-based
+    types), uploads it to GCS, caches the URL, and returns it.
+    Subsequent calls return the cached URL instantly.
+
+    Args:
+        material_type: One of 'alphabet', 'number', 'shape', 'color'.
+
+    Returns:
+        ``{"url": "https://storage.googleapis.com/..."}``
+    """
+    if material_type not in VALID_MATERIAL_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid material_type '{material_type}'. "
+                   f"Must be one of: {', '.join(sorted(VALID_MATERIAL_TYPES))}",
+        )
+
+    try:
+        user_uid = uuid.UUID(user_id)
+        plan_uid = uuid.UUID(plan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id or plan_id")
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(WeeklyPlan).where(
+                WeeklyPlan.id == plan_uid,
+                WeeklyPlan.user_id == user_uid,
+            )
+        )
+        plan_row = result.scalar_one_or_none()
+
+        if not plan_row:
+            raise HTTPException(status_code=404, detail="Plan not found.")
+
+        try:
+            url = await get_or_generate_material(plan_row, material_type)
+        except Exception as e:
+            logger.error("Material generation failed for plan %s, type %s: %s",
+                         plan_id, material_type, e, exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Material generation failed: {e}",
+            )
+
+    return {"url": url}
 
 
 def _rebuild_daily_plans(activities: list[dict]) -> list[dict]:

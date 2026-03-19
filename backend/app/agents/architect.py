@@ -57,6 +57,12 @@ Structure:
 - Each activity: safety_notes (specific, not vague) + at least one adaptation.
 - Circle time: greeting song, goodbye song, 2–3 yoga poses, read-aloud, \
   discussion prompt.
+- letter_word: a single theme-relevant word starting with the letter of the week (for the alphabet poster).
+- counting_object: a plural, theme-relevant noun for the counting poster (e.g. "caterpillars").
+- CRITICAL: You must randomly vary your selections for letter, color, and shape. \
+  Do NOT rely on deterministic or obvious choices (e.g., do not always pick 'G' and \
+  'Green' for a garden theme). Pick unexpected but highly relevant items to ensure \
+  variety across different weeks.
 - yoga_poses: 2–3 entries with a short thematic keyword in `name`. \
   Leave image_url as "", how_to and creative_cues as [].
 - Newsletter: professional_version + warm_version fields.
@@ -87,6 +93,9 @@ JSON SCHEMA (follow exactly — all fields required unless noted):
     "color": "<string>",
     "shape": "<string>",
     "counting_to": <int>,
+    "letter_word": "<thematic word starting with the letter>",
+    "counting_object": "<plural thematic object for counting poster>",
+    "color_object": "<a thematic object clearly representing the color, e.g. 'green frog', 'red ladybug'>",
     "greeting_song": {"title":"<string>","script":"<string>","duration":"<MM:SS>"},
     "goodbye_song":  {"title":"<string>","script":"<string>","duration":"<MM:SS>"},
     "yoga_poses": [{"name":"<keyword>","image_url":"","how_to":[],"creative_cues":[]}, ...],

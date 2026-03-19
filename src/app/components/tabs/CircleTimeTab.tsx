@@ -1,16 +1,20 @@
 import { useState } from "react";
-import { Music, ChevronDown, ChevronUp, Clock, Play } from "lucide-react";
+import { Music, ChevronDown, ChevronUp, Clock, Play, Download, Loader2, ExternalLink, FileText } from "lucide-react";
 import { WeekPlan } from "../../utils/mockData";
 import { YogaSection } from "../circle-time/YogaSection";
 import { MusicMovementSection } from "../circle-time/MusicMovementSection";
+import { downloadMaterial, MaterialType } from "../../utils/api";
 
 interface CircleTimeTabProps {
   week: WeekPlan;
+  planId?: string;
 }
 
 const routineItems = [
   { id: "greeting", title: "Greeting Song", icon: "🎵" },
   { id: "weather", title: "Weather", icon: "🌤️" },
+  { id: "days", title: "Days of the Week", icon: "📅" },
+  { id: "months", title: "Months of the Year", icon: "🗓️" },
   { id: "letter", title: "Letter", icon: "📝" },
   { id: "color", title: "Color", icon: "🎨" },
   { id: "shape", title: "Shape", icon: "⭐" },
@@ -18,8 +22,87 @@ const routineItems = [
   { id: "goodbye", title: "Goodbye Song", icon: "👋" },
 ];
 
-export function CircleTimeTab({ week }: CircleTimeTabProps) {
+// Static daily-routine PDFs hosted on GCS
+const STATIC_MATERIALS = [
+  {
+    id: "days-of-week",
+    title: "Days of the Week",
+    icon: "📅",
+    url: "https://storage.googleapis.com/early-nurturer-planner-assets/static-materials/days_of_the_week.pdf",
+  },
+  {
+    id: "months-of-year",
+    title: "Months of the Year",
+    icon: "🗓️",
+    url: "https://storage.googleapis.com/early-nurturer-planner-assets/static-materials/months_of_the_year.pdf",
+  },
+  {
+    id: "types-of-weather",
+    title: "Types of Weather",
+    icon: "🌤️",
+    url: "https://storage.googleapis.com/early-nurturer-planner-assets/static-materials/weather.pdf",
+  },
+];
+
+export function CircleTimeTab({ week, planId }: CircleTimeTabProps) {
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [loadingMaterial, setLoadingMaterial] = useState<MaterialType | null>(null);
+  const [materialError, setMaterialError] = useState<string | null>(null);
+  const [generatedUrls, setGeneratedUrls] = useState<Partial<Record<MaterialType, string>>>({});
+
+  const handleDownloadMaterial = async (type: MaterialType) => {
+    if (!planId) return;
+
+    // If already generated, just open it directly
+    const cached = generatedUrls[type];
+    if (cached) {
+      window.open(cached, "_blank");
+      return;
+    }
+
+    setLoadingMaterial(type);
+    setMaterialError(null);
+    try {
+      const url = await downloadMaterial(planId, type);
+      setGeneratedUrls((prev) => ({ ...prev, [type]: url }));
+      window.open(url, "_blank");
+    } catch (err: any) {
+      setMaterialError(err.message ?? "Download failed");
+    } finally {
+      setLoadingMaterial(null);
+    }
+  };
+
+  const themeFocusItems: { type: MaterialType; title: string; icon: string; subtitle: string }[] = [
+    {
+      type: "alphabet",
+      title: `Letter ${week.circleTime.letter.toUpperCase()}${week.circleTime.letter.toLowerCase()}`,
+      icon: "📝",
+      subtitle: week.circleTime.letterWord
+        ? `${week.circleTime.letter.toUpperCase()} is for ${week.circleTime.letterWord}`
+        : `Letter of the week`,
+    },
+    {
+      type: "number",
+      title: `Count to ${week.circleTime.countingTo}`,
+      icon: "🔢",
+      subtitle: week.circleTime.countingObject
+        ? `${week.circleTime.countingTo} ${week.circleTime.countingObject}`
+        : `Counting practice`,
+    },
+    {
+      type: "shape",
+      title: week.circleTime.shape,
+      icon: "⭐",
+      subtitle: "Shape of the week",
+    },
+    {
+      type: "color",
+      title: week.circleTime.color,
+      icon: "🎨",
+      subtitle: "Color of the week",
+    },
+  ];
 
   const getAdaptations = (itemId: string) => {
     const adaptations = [
@@ -49,6 +132,82 @@ export function CircleTimeTab({ week }: CircleTimeTabProps) {
         <div className="flex items-center justify-center gap-2 text-sm font-medium text-foreground">
           <Clock className="w-4 h-4" style={{ color: 'var(--theme-primary)' }} />
           <span>Used Monday–Friday • 8:45 AM • 10–15 minutes</span>
+        </div>
+      </div>
+
+      {/* ═══ Daily Fundamentals (Static PDFs) ═══ */}
+      <div>
+        <h2 className="text-lg font-medium text-foreground mb-4 flex items-center gap-2">
+          <FileText className="w-5 h-5" style={{ color: 'var(--theme-primary)' }} />
+          <span>Daily Fundamentals</span>
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {STATIC_MATERIALS.map((mat) => (
+            <a
+              key={mat.id}
+              href={mat.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group bg-white rounded-2xl shadow-sm border border-border p-5 flex items-center gap-4 hover:shadow-md transition-shadow"
+            >
+              <span className="text-3xl">{mat.icon}</span>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-foreground text-sm truncate">{mat.title}</p>
+                <p className="text-xs text-muted-foreground">Universal poster</p>
+              </div>
+              <ExternalLink className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
+            </a>
+          ))}
+        </div>
+      </div>
+
+      {/* ═══ This Week's Theme Focus (Dynamic Posters) ═══ */}
+      <div>
+        <h2 className="text-lg font-medium text-foreground mb-4 flex items-center gap-2">
+          <span className="text-xl">{week.themeEmoji}</span>
+          <span>This Week&apos;s Theme Focus</span>
+        </h2>
+        {materialError && (
+          <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
+            {materialError}
+          </div>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {themeFocusItems.map((item) => (
+            <div
+              key={item.type}
+              className="bg-white rounded-2xl shadow-sm border border-border p-5 flex flex-col items-center text-center gap-3"
+            >
+              <span className="text-3xl">{item.icon}</span>
+              <div>
+                <p className="font-semibold text-foreground">{item.title}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{item.subtitle}</p>
+              </div>
+              <button
+                onClick={() => handleDownloadMaterial(item.type)}
+                disabled={!planId || loadingMaterial !== null}
+                className="mt-auto inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--theme-primary)' }}
+              >
+                {loadingMaterial === item.type ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Generating…
+                  </>
+                ) : generatedUrls[item.type] ? (
+                  <>
+                    <ExternalLink className="w-4 h-4" />
+                    Open Poster
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    Download Poster
+                  </>
+                )}
+              </button>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -222,7 +381,17 @@ export function CircleTimeTab({ week }: CircleTimeTabProps) {
                       </p>
                     </div>
                   )}
-                  {item.id !== "greeting" && item.id !== "goodbye" && (
+                  {item.id === "days" && (
+                    <p className="text-sm text-muted-foreground">
+                      Sing through the days of the week using the poster. Point to each day and emphasize &quot;today is…&quot;
+                    </p>
+                  )}
+                  {item.id === "months" && (
+                    <p className="text-sm text-muted-foreground">
+                      Review the months of the year using the poster. Highlight the current month and upcoming birthdays or events.
+                    </p>
+                  )}
+                  {item.id !== "greeting" && item.id !== "goodbye" && item.id !== "days" && item.id !== "months" && (
                     <p className="text-sm text-muted-foreground">
                       Interactive activity focused on {item.title.toLowerCase()}
                     </p>

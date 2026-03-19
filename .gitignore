@@ -35,3 +35,4 @@ npm-debug.log*
 
 # GCP Bucket
 backend/data_prep/
+samples/

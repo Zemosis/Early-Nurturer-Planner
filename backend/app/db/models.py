@@ -220,6 +220,10 @@ class WeeklyPlan(Base):
     pdf_url: Mapped[str | None] = mapped_column(
         String(512), doc="Public GCS URL to the generated PDF for this plan."
     )
+    material_urls: Mapped[dict | None] = mapped_column(
+        JSONB,
+        doc='{"alphabet_pdf_url": "...", "number_pdf_url": "...", "shape_pdf_url": "...", "color_pdf_url": "..."}'
+    )
     is_generated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

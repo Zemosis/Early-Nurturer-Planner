@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Color Poster - {{ color_name }}</title>
+    <style>
+        @font-face {
+            font-family: 'Nunito';
+            src: url('{{ font_dir }}/Nunito-Bold.ttf') format('truetype');
+            font-weight: 700;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Nunito';
+            src: url('{{ font_dir }}/Nunito-Black.ttf') format('truetype');
+            font-weight: 900;
+            font-style: normal;
+        }
+        @page { size: letter portrait; margin: 0; }
+        body {
+            margin: 0; padding: 0; width: 8.5in; height: 11in;
+            font-family: 'Nunito', Arial, sans-serif; background-color: #FFFFFF;
+        }
+        .poster-container {
+            width: 100%; height: 100%;
+            border: 35px solid {{ theme_color }};
+            box-sizing: border-box;
+            display: flex; flex-direction: column; justify-content: space-between;
+            align-items: center; padding: 1in 0.8in;
+        }
+        .color-title {
+            font-size: 150px; font-weight: 900;
+            color: {{ theme_color }}; letter-spacing: 4px;
+            text-transform: uppercase; margin: 0; line-height: 1.1;
+        }
+        .image-container {
+            flex: 1 1 auto; display: flex; justify-content: center; align-items: center;
+            width: 100%; min-height: 0; padding: 10px 0; overflow: hidden;
+        }
+        .image-container img {
+            max-width: 100%; max-height: 100%; object-fit: contain;
+            border-radius: 20px;
+        }
+        .object-text {
+            font-size: 52px; font-weight: 700;
+            color: {{ theme_color }}; letter-spacing: 2px;
+            margin: 0; line-height: 1; white-space: nowrap;
+            text-align: center; text-transform: capitalize;
+        }
+    </style>
+</head>
+<body>
+    <div class="poster-container">
+        <div class="color-title">{{ color_name }}</div>
+        <div class="image-container">
+            {% if image_url %}
+            <img src="{{ image_url }}" alt="{{ color_object }}">
+            {% endif %}
+        </div>
+        <div class="object-text">{{ color_object }}</div>
+    </div>
+</body>
+</html>

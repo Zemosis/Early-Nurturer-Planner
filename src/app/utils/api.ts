@@ -217,3 +217,25 @@ export async function regeneratePlanPDF(
 
   return res.blob();
 }
+
+// ── Material Poster Download ─────────────────────────────────
+
+export type MaterialType = 'alphabet' | 'number' | 'shape' | 'color';
+
+export async function downloadMaterial(
+  planId: string,
+  materialType: MaterialType,
+  userId: string = DEFAULT_USER_ID
+): Promise<string> {
+  const res = await fetch(
+    `${API_BASE}/api/planner/${userId}/plan/${planId}/material/${materialType}`
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Material download failed");
+  }
+
+  const data = await res.json();
+  return data.url;
+}

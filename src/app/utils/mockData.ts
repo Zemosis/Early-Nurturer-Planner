@@ -13,6 +13,9 @@ export interface WeekPlan {
     color: string;
     shape: string;
     countingTo: number;
+    letterWord?: string;
+    countingObject?: string;
+    colorObject?: string;
     greetingSong: { title: string; script: string; videoUrl: string; duration: string };
     goodbyeSong: { title: string; script: string; videoUrl: string; duration: string };
     yogaPoses: {

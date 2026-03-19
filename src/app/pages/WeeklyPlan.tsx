@@ -155,7 +155,7 @@ export default function WeeklyPlan() {
 
         {activeTab === "overview" && <OverviewTab week={week} />}
         {activeTab === "schedule" && <DailyScheduleTab week={week} />}
-        {activeTab === "circle" && <CircleTimeTab week={week} />}
+        {activeTab === "circle" && <CircleTimeTab week={week} planId={weekId} />}
         {activeTab === "activities" && <ThemeActivitiesTab week={week} />}
         {activeTab === "materials" && <MaterialsTab week={week} />}
         {activeTab === "newsletter" && <NewsletterTab week={week} />}
