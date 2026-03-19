@@ -1,6 +1,28 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { themeLibrary, ThemeDetail } from '../utils/themeData';
 
+/** Neutral fallback theme used before the real plan theme is loaded. */
+const NEUTRAL_THEME: ThemeDetail = {
+  id: '__neutral__',
+  name: 'Loading…',
+  emoji: '📋',
+  letter: '',
+  shape: '',
+  mood: '',
+  atmosphere: [],
+  visualDirection: '',
+  palette: {
+    primary: 'Gray',
+    secondary: 'Gray',
+    accent: 'Gray',
+    background: 'White',
+    hex: { primary: '#6B7280', secondary: '#9CA3AF', accent: '#D1D5DB', background: '#F9FAFB' },
+  },
+  circleTime: { greetingStyle: '', countingContext: '', letterExamples: [], movementPrompt: '', color: '' },
+  activities: [],
+  environment: { description: '', visualElements: [], ambiance: '' },
+};
+
 interface ThemeContextType {
   currentTheme: ThemeDetail;
   setTheme: (themeId: string) => void;
@@ -12,8 +34,8 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [currentTheme, setCurrentTheme] = useState<ThemeDetail>(themeLibrary[0]);
-  const [originalTheme, setOriginalTheme] = useState<ThemeDetail>(themeLibrary[0]);
+  const [currentTheme, setCurrentTheme] = useState<ThemeDetail>(NEUTRAL_THEME);
+  const [originalTheme, setOriginalTheme] = useState<ThemeDetail>(NEUTRAL_THEME);
   const [dynamicThemes, setDynamicThemes] = useState<ThemeDetail[]>([]);
 
   const findTheme = (themeId: string): ThemeDetail | undefined =>

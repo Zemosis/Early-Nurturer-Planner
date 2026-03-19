@@ -152,6 +152,12 @@ class ThemePool(Base):
         Boolean, default=False, nullable=False,
         doc="True once the user has generated a plan with this theme."
     )
+    plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("weekly_plans.id", ondelete="SET NULL"),
+        nullable=True,
+        doc="If this pool theme was demoted from an active plan, links back to that plan."
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -177,23 +183,23 @@ class WeeklyPlan(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    week_number: Mapped[int] = mapped_column(
-        Integer, nullable=False,
-        doc="Cumulative global week number across all user plans (auto-incremented)."
+    week_number: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+        doc="Cumulative global week number across all user plans (auto-incremented). NULL = unscheduled."
     )
-    year: Mapped[int] = mapped_column(
-        Integer, nullable=False,
-        doc="Calendar year, e.g. 2026."
+    year: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+        doc="Calendar year, e.g. 2026. NULL = unscheduled."
     )
-    month: Mapped[int] = mapped_column(
-        Integer, nullable=False,
-        doc="Calendar month 1-12."
+    month: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+        doc="Calendar month 1-12. NULL = unscheduled."
     )
-    week_of_month: Mapped[int] = mapped_column(
-        Integer, nullable=False,
-        doc="Week number within the month (1-5), resets each month."
+    week_of_month: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+        doc="Week number within the month (1-5), resets each month. NULL = unscheduled."
     )
-    week_range: Mapped[str] = mapped_column(String(50), nullable=False, doc="e.g. '2/23 - 2/27'")
+    week_range: Mapped[str | None] = mapped_column(String(50), nullable=True, doc="e.g. '2/23 - 2/27'. NULL = unscheduled.")
     theme: Mapped[str] = mapped_column(String(255), nullable=False)
     theme_emoji: Mapped[str | None] = mapped_column(String(10))
     palette: Mapped[dict | None] = mapped_column(

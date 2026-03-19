@@ -188,6 +188,196 @@ async def generate_plan(request: GeneratePlanRequest, background_tasks: Backgrou
         )
 
 
+@router.post("/{user_id}/plan/{current_plan_id}/swap/{pool_theme_id}")
+async def swap_theme(
+    user_id: str,
+    current_plan_id: str,
+    pool_theme_id: str,
+    background_tasks: BackgroundTasks,
+):
+    """Swap the active plan's theme back into the pool and promote a pool theme.
+
+    The old plan is NOT deleted — it is "unscheduled" by setting all calendar
+    fields to NULL.  This preserves the full JSON payload and GCS assets so
+    the plan can be instantly resurrected if the user swaps it back in.
+
+    1. Demote: current plan → unschedule (NULL calendar) + new ThemePool row
+       with plan_id linking to the sleeping plan.
+    2. Promote: if pool theme has a plan_id, resurrect that sleeping plan
+       into the freed calendar slot.  Otherwise, run LangGraph generation.
+    3. Delete the promoted pool theme row so it leaves the sidebar.
+    """
+    try:
+        user_uid = uuid.UUID(user_id)
+        plan_uid = uuid.UUID(current_plan_id)
+        pool_uid = uuid.UUID(pool_theme_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID in path")
+
+    # ── Read current plan + pool theme, capture slot info ──────────
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(WeeklyPlan).where(
+                WeeklyPlan.id == plan_uid,
+                WeeklyPlan.user_id == user_uid,
+            )
+        )
+        current_plan = result.scalar_one_or_none()
+        if not current_plan:
+            raise HTTPException(status_code=404, detail="Current plan not found")
+
+        result = await session.execute(
+            select(ThemePool).where(
+                ThemePool.id == pool_uid,
+                ThemePool.user_id == user_uid,
+                ThemePool.is_used == False,
+            )
+        )
+        pool_theme = result.scalar_one_or_none()
+        if not pool_theme:
+            raise HTTPException(status_code=404, detail="Pool theme not found or already used")
+
+        # Capture the calendar slot of the plan being replaced
+        old_slot = {
+            "week_number": current_plan.week_number,
+            "week_range": current_plan.week_range,
+            "year": current_plan.year,
+            "month": current_plan.month,
+            "week_of_month": current_plan.week_of_month,
+        }
+
+        # ── Build a full ThemeSchema-shaped dict for the demoted theme ──
+        # WeeklyPlan.circle_time uses CircleTimeSchema keys (letter, shape,
+        # color, greeting_song, counting_to, counting_object, letter_word …).
+        # The frontend transformer expects ThemeCircleTime keys (greeting_style,
+        # counting_context, letter_examples, movement_prompt, color).
+        ct = current_plan.circle_time or {}
+        greeting_song = ct.get("greeting_song") or {}
+        domains = current_plan.domains or []
+
+        demoted_theme_data = {
+            "id": (current_plan.theme or "").lower().replace(" ", "-"),
+            "name": current_plan.theme or "",
+            "emoji": current_plan.theme_emoji or "📁",
+            "letter": ct.get("letter", ""),
+            "shape": ct.get("shape", ""),
+            "mood": ", ".join(domains) if domains else "",
+            "atmosphere": domains[:4],
+            "visual_direction": "",
+            "palette": current_plan.palette or {},
+            "circle_time": {
+                "greeting_style": greeting_song.get("title", ""),
+                "counting_context": ct.get("counting_object", ""),
+                "letter_examples": [w for w in [ct.get("letter_word", "")] if w],
+                "movement_prompt": ct.get("discussion_prompt", ""),
+                "color": ct.get("color", ""),
+            },
+            "activities": [
+                {
+                    "title": a.get("title", ""),
+                    "description": a.get("description", ""),
+                    "materials": a.get("materials", []),
+                }
+                for a in (current_plan.activities or [])[:4]
+            ],
+            "environment": {
+                "description": f"Saved curriculum plan: {current_plan.theme or 'Unknown'}",
+                "visual_elements": [],
+                "ambiance": "",
+            },
+        }
+
+        demoted_row = ThemePool(
+            user_id=user_uid,
+            theme_data=demoted_theme_data,
+            is_used=False,
+            plan_id=current_plan.id,
+        )
+        session.add(demoted_row)
+
+        # Snapshot promotion info before mutating
+        existing_plan_id = pool_theme.plan_id
+        pool_theme_data = pool_theme.theme_data
+
+        # ── Unschedule the current plan (free the calendar slot) ──
+        # Keep the row alive so JSON + GCS assets survive for resurrection.
+        current_plan.week_number = None
+        current_plan.year = None
+        current_plan.month = None
+        current_plan.week_of_month = None
+        current_plan.week_range = None
+
+        # Delete the promoted pool theme row (it's leaving the sidebar)
+        await session.delete(pool_theme)
+        await session.commit()
+
+    # ── Promote: reuse existing plan or generate a new one ─────────
+
+    # A pool slot was consumed — refill in the background regardless of path
+    background_tasks.add_task(refill_theme_pool_bg, user_uid)
+
+    if existing_plan_id:
+        # The promoted pool theme already has a generated plan (sleeping/
+        # unscheduled).  Resurrect it by applying the freed calendar slot.
+        logger.info("Swap: resurrecting sleeping plan %s for pool theme %s",
+                     existing_plan_id, pool_theme_id)
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(WeeklyPlan).where(WeeklyPlan.id == existing_plan_id)
+            )
+            promoted_plan = result.scalar_one_or_none()
+            if promoted_plan:
+                promoted_plan.week_number = old_slot["week_number"]
+                promoted_plan.week_range = old_slot["week_range"]
+                promoted_plan.year = old_slot["year"]
+                promoted_plan.month = old_slot["month"]
+                promoted_plan.week_of_month = old_slot["week_of_month"]
+                await session.commit()
+            else:
+                logger.warning("Swap: sleeping plan %s not found, falling through to generation",
+                               existing_plan_id)
+                existing_plan_id = None  # fall through to generation below
+
+    if existing_plan_id:
+        return {
+            "status": "existing",
+            "plan_id": str(existing_plan_id),
+        }
+
+    # Generate a brand-new plan in the old slot
+    logger.info("Swap: generating new plan for pool theme %s", pool_theme_id)
+
+    try:
+        graph_app = build_planner_graph()
+        initial_state = {
+            "user_id": user_id,
+            "thread_id": str(uuid.uuid4()),
+            "selected_theme": pool_theme_data,
+            "week_number": old_slot["week_number"],
+            "week_range": old_slot["week_range"],
+            "year": old_slot["year"],
+            "month": old_slot["month"],
+            "week_of_month": old_slot["week_of_month"],
+            "iteration_count": 0,
+        }
+        final_state = await graph_app.ainvoke(initial_state)
+        plan = final_state.get("personalized_plan") or final_state.get("draft_plan")
+        if not plan:
+            raise HTTPException(
+                status_code=500,
+                detail=final_state.get("error") or "Pipeline produced no usable plan.",
+            )
+        saved_plan_id = final_state.get("saved_plan_id")
+        return {
+            "status": "generated",
+            "plan_id": str(saved_plan_id) if saved_plan_id else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Plan generation failed: {e}")
+
+
 @router.get("/{user_id}/plans")
 async def list_plans(user_id: str):
     """List all saved plans for a user, ordered by creation date descending."""
@@ -199,7 +389,10 @@ async def list_plans(user_id: str):
     async with async_session_factory() as session:
         result = await session.execute(
             select(WeeklyPlan)
-            .where(WeeklyPlan.user_id == user_uid)
+            .where(
+                WeeklyPlan.user_id == user_uid,
+                WeeklyPlan.week_number.isnot(None),  # exclude unscheduled (demoted) plans
+            )
             .order_by(WeeklyPlan.created_at.desc())
         )
         plans = result.scalars().all()
@@ -291,11 +484,14 @@ async def reorder_plans(user_id: str, updates: list[PlanPositionUpdate]):
             "Reordered %d plans for user %s", len(updates), user_id
         )
 
-    # Return the updated plan summaries
+    # Return the updated plan summaries (exclude unscheduled plans)
     async with async_session_factory() as session:
         result = await session.execute(
             select(WeeklyPlan)
-            .where(WeeklyPlan.user_id == user_uid)
+            .where(
+                WeeklyPlan.user_id == user_uid,
+                WeeklyPlan.week_number.isnot(None),
+            )
             .order_by(WeeklyPlan.week_number)
         )
         plans = result.scalars().all()
@@ -396,10 +592,13 @@ async def delete_plan(user_id: str, plan_id: str):
         await session.delete(plan_row)
         await session.flush()
 
-        # Fetch remaining plans ordered by current week_number
+        # Fetch remaining scheduled plans (exclude unscheduled/demoted ones)
         remaining_result = await session.execute(
             select(WeeklyPlan)
-            .where(WeeklyPlan.user_id == user_uid)
+            .where(
+                WeeklyPlan.user_id == user_uid,
+                WeeklyPlan.week_number.isnot(None),
+            )
             .order_by(WeeklyPlan.week_number)
         )
         remaining = remaining_result.scalars().all()

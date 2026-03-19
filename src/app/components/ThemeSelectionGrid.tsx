@@ -9,7 +9,6 @@ import { motion, AnimatePresence } from "motion/react";
 import { Check, Sparkles, Eye, Bookmark } from "lucide-react";
 import { useState } from "react";
 import { ThemeDetail } from "../utils/themeData";
-import { useTheme } from "../contexts/ThemeContext";
 
 interface ThemeSelectionGridProps {
   themes: ThemeDetail[];
@@ -31,23 +30,19 @@ export function ThemeSelectionGrid({
   skeletonCount = 0,
 }: ThemeSelectionGridProps) {
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
-  const { previewTheme } = useTheme();
 
   const handleMouseEnter = (themeId: string) => {
     if (enableHoverPreview && themeId !== selectedThemeId) {
       setPreviewThemeId(themeId);
-      previewTheme(themeId);
     }
   };
 
   const handleMouseLeave = () => {
     setPreviewThemeId(null);
-    previewTheme(null);
   };
 
   const handleClick = (themeId: string) => {
     setPreviewThemeId(null);
-    previewTheme(null);
     onSelectTheme(themeId);
   };
 

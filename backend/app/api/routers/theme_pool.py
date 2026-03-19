@@ -19,6 +19,7 @@ from sqlalchemy import select, func, update
 from app.agents.tools import fetch_student_context, generate_theme_options
 from app.db.database import async_session_factory
 from app.db.models import ThemePool, WeeklyPlan
+from app.services.pdf_service import delete_plan_assets_from_gcs
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +52,25 @@ class ThemePoolItem(BaseModel):
     """Single theme in the pool — returned to frontend."""
     id: str
     theme_data: dict
+    plan_id: str | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────
 
 
 async def _collect_existing_theme_names(user_id: uuid.UUID, session) -> list[str]:
-    """Gather theme names from active pool + last 20 weekly plans for uniqueness."""
+    """Gather theme names to exclude from AI generation (uniqueness enforcement).
+
+    Sources (the "Shadow Pool"):
+      1. Active pool themes (is_used=False) — don't duplicate what's already offered.
+      2. Last 10 weekly plans — if a plan was deleted it won't appear here, which
+         is intentional: deleted themes become eligible for regeneration.
+      3. Last 10 explicitly discarded pool themes (is_used=True, plan_id IS NULL) —
+         themes the user refreshed away. They shouldn't come back soon.
+    """
     names: list[str] = []
 
-    # Active pool theme names
+    # 1. Active pool theme names
     pool_result = await session.execute(
         select(ThemePool.theme_data)
         .where(ThemePool.user_id == user_id, ThemePool.is_used == False)
@@ -69,16 +79,31 @@ async def _collect_existing_theme_names(user_id: uuid.UUID, session) -> list[str
         if isinstance(td, dict) and td.get("name"):
             names.append(td["name"])
 
-    # Recent plan theme names (last 20)
+    # 2. Last 10 weekly plans (deleted plans naturally drop off)
     plan_result = await session.execute(
         select(WeeklyPlan.theme)
         .where(WeeklyPlan.user_id == user_id)
         .order_by(WeeklyPlan.created_at.desc())
-        .limit(20)
+        .limit(10)
     )
     for (theme_name,) in plan_result.all():
         if theme_name:
             names.append(theme_name)
+
+    # 3. Last 10 explicitly discarded themes (refreshed/shuffled away)
+    discarded_result = await session.execute(
+        select(ThemePool.theme_data)
+        .where(
+            ThemePool.user_id == user_id,
+            ThemePool.is_used == True,
+            ThemePool.plan_id.is_(None),
+        )
+        .order_by(ThemePool.created_at.desc())
+        .limit(10)
+    )
+    for (td,) in discarded_result.all():
+        if isinstance(td, dict) and td.get("name"):
+            names.append(td["name"])
 
     return names
 
@@ -215,7 +240,7 @@ async def get_theme_pool(user_id: str):
             )
         return {
             "themes": [
-                ThemePoolItem(id=str(t.id), theme_data=t.theme_data)
+                ThemePoolItem(id=str(t.id), theme_data=t.theme_data, plan_id=str(t.plan_id) if t.plan_id else None)
                 for t in active_themes[:POOL_SIZE]
             ],
             "generating": False,
@@ -230,7 +255,7 @@ async def get_theme_pool(user_id: str):
 
     return {
         "themes": [
-            ThemePoolItem(id=str(t.id), theme_data=t.theme_data)
+            ThemePoolItem(id=str(t.id), theme_data=t.theme_data, plan_id=str(t.plan_id) if t.plan_id else None)
             for t in active_themes[:POOL_SIZE]
         ],
         "generating": is_generating,
@@ -266,12 +291,26 @@ async def refresh_theme_pool(user_id: str, request: RefreshRequest):
         )
         active_themes = list(result.scalars().all())
 
-        # Mark non-kept as used
+        # Mark non-kept as used; clean up linked plans
         kept = []
         for t in active_themes:
             if t.id in keep_uuids:
                 kept.append(t)
             else:
+                # If this pool theme has a linked plan, delete its GCS assets & DB row
+                if t.plan_id:
+                    try:
+                        deleted_count = delete_plan_assets_from_gcs(t.plan_id)
+                        logger.info("Cleaned up %d GCS blobs for demoted plan %s", deleted_count, t.plan_id)
+                        plan_result = await session.execute(
+                            select(WeeklyPlan).where(WeeklyPlan.id == t.plan_id)
+                        )
+                        plan_row = plan_result.scalar_one_or_none()
+                        if plan_row:
+                            await session.delete(plan_row)
+                            logger.info("Deleted WeeklyPlan row %s (demoted theme discarded)", t.plan_id)
+                    except Exception as cleanup_err:
+                        logger.warning("Failed to clean up demoted plan %s: %s", t.plan_id, cleanup_err)
                 t.is_used = True
 
         missing = POOL_SIZE - len(kept)
@@ -289,7 +328,7 @@ async def refresh_theme_pool(user_id: str, request: RefreshRequest):
 
         return {
             "themes": [
-                ThemePoolItem(id=str(t.id), theme_data=t.theme_data)
+                ThemePoolItem(id=str(t.id), theme_data=t.theme_data, plan_id=str(t.plan_id) if t.plan_id else None)
                 for t in kept[:POOL_SIZE]
             ],
             "generating": False,

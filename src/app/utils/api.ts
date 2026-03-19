@@ -13,6 +13,7 @@ export const DEFAULT_USER_ID = "83b58b5f-698b-4ae1-9529-f83d97641f01";
 export interface ThemePoolItem {
   id: string;
   theme_data: Record<string, unknown>;
+  plan_id?: string | null;
 }
 
 export interface ThemePoolResponse {
@@ -178,6 +179,29 @@ export async function fetchPlanById(
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "Failed to fetch plan");
+  }
+  return res.json();
+}
+
+// ── Theme Swap ──────────────────────────────────────────────
+
+export interface SwapThemeResult {
+  status: 'existing' | 'generated';
+  plan_id: string | null;
+}
+
+export async function swapTheme(
+  currentPlanId: string,
+  poolThemeId: string,
+  userId: string = DEFAULT_USER_ID
+): Promise<SwapThemeResult> {
+  const res = await fetch(
+    `${API_BASE}/api/planner/${userId}/plan/${currentPlanId}/swap/${poolThemeId}`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Theme swap failed");
   }
   return res.json();
 }

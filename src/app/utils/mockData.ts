@@ -70,6 +70,12 @@ export interface WeekPlan {
   };
   coverImageUrl?: string;
   pdfUrl?: string;
+  palette?: {
+    primary: string;
+    secondary: string;
+    accent: string;
+    background: string;
+  };
   generated: boolean;
 }
 

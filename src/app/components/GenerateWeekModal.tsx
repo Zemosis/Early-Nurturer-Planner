@@ -50,7 +50,6 @@ export function GenerateWeekModal({ onComplete, onClose }: GenerateWeekModalProp
 
     if (!preserveSelection && transformed.length > 0) {
       setSelectedThemeId(transformed[0].id);
-      setThemeFromDetail(transformed[0]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -117,8 +116,6 @@ export function GenerateWeekModal({ onComplete, onClose }: GenerateWeekModalProp
       return;
     }
     setSelectedThemeId(themeId);
-    const detail = themeOptions.find((t) => t.id === themeId);
-    if (detail) setThemeFromDetail(detail);
   };
 
   const handleRefresh = async () => {
@@ -150,6 +147,10 @@ export function GenerateWeekModal({ onComplete, onClose }: GenerateWeekModalProp
     const poolItem = themePool[idx];
     const rawTheme = poolItem?.theme_data ?? {};
     const poolUuid = poolIdMap.get(selectedThemeId);
+
+    // Commit the selected theme to global context NOW (user confirmed)
+    const selectedDetail = themeOptions.find((t) => t.id === selectedThemeId);
+    if (selectedDetail) setThemeFromDetail(selectedDetail);
 
     setStage("generating-plan");
     try {

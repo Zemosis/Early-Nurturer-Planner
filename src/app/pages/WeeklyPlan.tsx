@@ -12,7 +12,8 @@ import { DailyScheduleTab } from "../components/tabs/DailyScheduleTab";
 import { ThemeSelectionHeader } from "../components/ThemeSelectionHeader";
 import { useTheme } from "../contexts/ThemeContext";
 import { usePlanner } from "../contexts/PlannerContext";
-import { fetchPlanById } from "../utils/api";
+import { ThemeDetail } from "../utils/themeData";
+import { fetchPlanById, swapTheme } from "../utils/api";
 import { transformApiPlanToWeekPlan } from "../utils/apiTransformers";
 
 const tabs = [
@@ -30,7 +31,7 @@ export default function WeeklyPlan() {
   const { weekId } = useParams<{ weekId: string }>();
   const [activeTab, setActiveTab] = useState("overview");
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const { setTheme, currentTheme } = useTheme();
+  const { setThemeFromDetail, currentTheme } = useTheme();
   const { currentPlan, currentPlanId, setCurrentPlan, setCurrentPlanId } = usePlanner();
 
   // Determine if we already have the plan in context
@@ -53,6 +54,34 @@ export default function WeeklyPlan() {
         const plan = transformApiPlanToWeekPlan(data);
         setCurrentPlan(plan);
         setCurrentPlanId(weekId);
+        // Apply the plan's palette to the global theme so the UI colors match
+        if (plan.palette) {
+          setThemeFromDetail({
+            id: weekId,
+            name: plan.theme,
+            emoji: plan.themeEmoji,
+            letter: plan.circleTime?.letter ?? '',
+            shape: plan.circleTime?.shape ?? '',
+            mood: '',
+            atmosphere: [],
+            visualDirection: '',
+            palette: {
+              primary: plan.palette.primary ?? '',
+              secondary: plan.palette.secondary ?? '',
+              accent: plan.palette.accent ?? '',
+              background: plan.palette.background ?? '',
+              hex: {
+                primary: plan.palette.primary ?? '#6B7280',
+                secondary: plan.palette.secondary ?? '#9CA3AF',
+                accent: plan.palette.accent ?? '#D1D5DB',
+                background: plan.palette.background ?? '#F9FAFB',
+              },
+            },
+            circleTime: { greetingStyle: '', countingContext: '', letterExamples: [], movementPrompt: '', color: plan.circleTime?.color ?? '' },
+            activities: [],
+            environment: { description: '', visualElements: [], ambiance: '' },
+          });
+        }
       } catch (err) {
         console.error("Failed to fetch plan:", err);
         if (!cancelled) setFetchFailed(true);
@@ -73,8 +102,25 @@ export default function WeeklyPlan() {
 
   const week = currentPlan;
 
-  const handleThemeChange = (themeId: string) => {
-    setTheme(themeId);
+  const [swapLoading, setSwapLoading] = useState(false);
+
+  const handleThemeChange = async (_theme: ThemeDetail, poolThemeUuid: string) => {
+    if (!weekId) return;
+    setSwapLoading(true);
+    try {
+      const result = await swapTheme(weekId, poolThemeUuid);
+      if (result.plan_id) {
+        // Clear stale context and show spinner so old plan unmounts cleanly
+        setCurrentPlan(null);
+        setCurrentPlanId(null);
+        setLoading(true);
+        navigate(`/week/${result.plan_id}`);
+      }
+    } catch (err) {
+      console.error("Theme swap failed:", err);
+    } finally {
+      setSwapLoading(false);
+    }
   };
 
   if (loading || !week) {
@@ -151,6 +197,7 @@ export default function WeeklyPlan() {
           onThemeChange={handleThemeChange}
           weekNumber={week.weekNumber}
           weekRange={week.weekRange}
+          swapLoading={swapLoading}
         />
 
         {activeTab === "overview" && <OverviewTab week={week} />}

@@ -6,16 +6,19 @@
  */
 
 import { motion } from "motion/react";
-import { RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
-import { useState } from "react";
-import { ThemeDetail, themeLibrary } from "../utils/themeData";
+import { RefreshCw, ChevronDown, ChevronUp, Loader2, ArrowRight } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { ThemeDetail } from "../utils/themeData";
 import { ThemeSelectionGrid } from "./ThemeSelectionGrid";
+import { fetchThemePool } from "../utils/api";
+import { transformApiThemeToThemeDetail } from "../utils/apiTransformers";
 
 interface ThemeSelectionHeaderProps {
   currentTheme: ThemeDetail;
-  onThemeChange: (themeId: string) => void;
+  onThemeChange: (theme: ThemeDetail, poolThemeUuid: string) => void;
   weekNumber: number;
   weekRange: string;
+  swapLoading?: boolean;
 }
 
 export function ThemeSelectionHeader({
@@ -23,13 +26,77 @@ export function ThemeSelectionHeader({
   onThemeChange,
   weekNumber,
   weekRange,
+  swapLoading = false,
 }: ThemeSelectionHeaderProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const handleShuffle = () => {
-    const otherThemes = themeLibrary.filter((t) => t.id !== currentTheme.id);
+  const [poolThemes, setPoolThemes] = useState<ThemeDetail[]>([]);
+  const [poolLoading, setPoolLoading] = useState(false);
+  const [selectedPoolTheme, setSelectedPoolTheme] = useState<ThemeDetail | null>(null);
+  // Map ThemeDetail.id → backend pool UUID
+  const [poolIdMap, setPoolIdMap] = useState<Map<string, string>>(new Map());
+
+  // Preview the selected pool theme's colors on the box; revert to currentTheme otherwise
+  const displayTheme = (isExpanded && selectedPoolTheme) ? selectedPoolTheme : currentTheme;
+
+  const loadPool = useCallback(async () => {
+    setPoolLoading(true);
+    try {
+      const resp = await fetchThemePool();
+      const idMap = new Map<string, string>();
+      const transformed = resp.themes.map((item) => {
+        const detail = transformApiThemeToThemeDetail(item.theme_data);
+        idMap.set(detail.id, item.id);
+        return detail;
+      });
+      setPoolThemes(transformed);
+      setPoolIdMap(idMap);
+    } catch (err) {
+      console.error("Failed to load theme pool:", err);
+    } finally {
+      setPoolLoading(false);
+    }
+  }, []);
+
+  // Fetch pool when sidebar expands
+  useEffect(() => {
+    if (isExpanded && poolThemes.length === 0) {
+      loadPool();
+    }
+  }, [isExpanded, poolThemes.length, loadPool]);
+
+  const handleShuffle = async () => {
+    let themes = poolThemes;
+    if (themes.length === 0) {
+      setPoolLoading(true);
+      try {
+        const resp = await fetchThemePool();
+        const idMap = new Map<string, string>();
+        themes = resp.themes.map((item) => {
+          const detail = transformApiThemeToThemeDetail(item.theme_data);
+          idMap.set(detail.id, item.id);
+          return detail;
+        });
+        setPoolThemes(themes);
+        setPoolIdMap(idMap);
+      } catch {
+        return;
+      } finally {
+        setPoolLoading(false);
+      }
+    }
+    const otherThemes = themes.filter((t) => t.id !== currentTheme.id);
+    if (otherThemes.length === 0) return;
     const randomTheme = otherThemes[Math.floor(Math.random() * otherThemes.length)];
-    onThemeChange(randomTheme.id);
+    setSelectedPoolTheme(randomTheme);
+    setIsExpanded(true);
+  };
+
+  const handleConfirmSwap = () => {
+    if (!selectedPoolTheme) return;
+    const poolUuid = poolIdMap.get(selectedPoolTheme.id);
+    if (!poolUuid) return;
+    onThemeChange(selectedPoolTheme, poolUuid);
   };
 
   return (
@@ -40,8 +107,8 @@ export function ThemeSelectionHeader({
         animate={{ opacity: 1, y: 0 }}
         className="rounded-2xl border-2 overflow-hidden theme-transition shadow-sm"
         style={{
-          borderColor: currentTheme.palette.hex.primary,
-          backgroundColor: currentTheme.palette.hex.background,
+          borderColor: displayTheme.palette.hex.primary,
+          backgroundColor: displayTheme.palette.hex.background,
         }}
       >
         {/* Header */}
@@ -49,14 +116,14 @@ export function ThemeSelectionHeader({
           <div className="flex items-center justify-between gap-4">
             {/* Theme Info */}
             <div className="flex items-center gap-3 flex-1 min-w-0">
-              <span className="text-3xl flex-shrink-0">{currentTheme.emoji}</span>
+              <span className="text-3xl flex-shrink-0">{displayTheme.emoji}</span>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <h2 className="text-lg font-medium text-foreground truncate">
-                    {currentTheme.name}
+                    {displayTheme.name}
                   </h2>
                   <div className="flex gap-1">
-                    {Object.entries(currentTheme.palette.hex)
+                    {Object.entries(displayTheme.palette.hex)
                       .filter(([key]) => key !== "background")
                       .slice(0, 3)
                       .map(([key, color]) => (
@@ -80,17 +147,21 @@ export function ThemeSelectionHeader({
                 onClick={handleShuffle}
                 className="flex items-center gap-2 px-3 py-2 bg-white border rounded-xl transition-all hover:shadow-md text-sm font-medium"
                 style={{
-                  borderColor: currentTheme.palette.hex.primary + "40",
-                  color: currentTheme.palette.hex.primary,
+                  borderColor: displayTheme.palette.hex.primary + "40",
+                  color: displayTheme.palette.hex.primary,
                 }}
               >
                 <RefreshCw className="w-4 h-4" />
                 <span className="hidden sm:inline">Change Theme</span>
               </button>
               <button
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={() => {
+                  const next = !isExpanded;
+                  setIsExpanded(next);
+                  if (!next) setSelectedPoolTheme(null);
+                }}
                 className="flex items-center gap-1 px-3 py-2 rounded-xl transition-all hover:bg-white/50 text-sm font-medium"
-                style={{ color: currentTheme.palette.hex.primary }}
+                style={{ color: displayTheme.palette.hex.primary }}
               >
                 <span className="hidden sm:inline">
                   {isExpanded ? "Hide" : "Show"} Options
@@ -106,14 +177,14 @@ export function ThemeSelectionHeader({
 
           {/* Mood Tags */}
           <div className="flex flex-wrap gap-2 mt-3">
-            {currentTheme.atmosphere.slice(0, 3).map((mood) => (
+            {displayTheme.atmosphere.slice(0, 3).map((mood) => (
               <span
                 key={mood}
                 className="px-2 py-1 rounded-lg text-xs font-medium border"
                 style={{
-                  backgroundColor: currentTheme.palette.hex.secondary + "20",
-                  borderColor: currentTheme.palette.hex.secondary + "30",
-                  color: currentTheme.palette.hex.secondary,
+                  backgroundColor: displayTheme.palette.hex.secondary + "20",
+                  borderColor: displayTheme.palette.hex.secondary + "30",
+                  color: displayTheme.palette.hex.secondary,
                 }}
               >
                 {mood}
@@ -134,14 +205,53 @@ export function ThemeSelectionHeader({
             <h3 className="text-sm font-medium text-foreground mb-4">
               Choose a Different Theme
             </h3>
-            <ThemeSelectionGrid
-              themes={themeLibrary}
-              selectedThemeId={currentTheme.id}
-              onSelectTheme={(themeId) => {
-                onThemeChange(themeId);
-                setIsExpanded(false);
-              }}
-            />
+            {poolLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-sm text-muted-foreground">Loading themes…</span>
+              </div>
+            ) : (
+              <ThemeSelectionGrid
+                themes={poolThemes}
+                selectedThemeId={selectedPoolTheme?.id ?? currentTheme.id}
+                enableHoverPreview={false}
+                onSelectTheme={(themeId) => {
+                  const selected = poolThemes.find((t) => t.id === themeId);
+                  if (selected) setSelectedPoolTheme(selected);
+                }}
+              />
+            )}
+
+            {/* Confirmation footer */}
+            {selectedPoolTheme && selectedPoolTheme.id !== currentTheme.id && (
+              <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                  <strong className="text-foreground">Selected:</strong>{" "}
+                  {selectedPoolTheme.emoji} {selectedPoolTheme.name}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setSelectedPoolTheme(null)}
+                    className="px-3 py-2 text-sm font-medium rounded-xl bg-muted/50 hover:bg-muted transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmSwap}
+                    disabled={swapLoading}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-xl transition-all hover:shadow-md disabled:opacity-50"
+                    style={{ backgroundColor: selectedPoolTheme.palette.hex.primary }}
+                  >
+                    {swapLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ArrowRight className="w-4 h-4" />
+                    )}
+                    {swapLoading ? "Swapping…" : "Change Theme"}
+                  </button>
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
       </motion.div>
