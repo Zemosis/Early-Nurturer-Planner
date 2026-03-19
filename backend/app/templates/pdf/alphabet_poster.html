@@ -18,19 +18,20 @@
         }
         @page { size: letter portrait; margin: 0; }
         body {
+            --theme-color: initial;
             margin: 0; padding: 0; width: 8.5in; height: 11in;
             font-family: 'Nunito', Arial, sans-serif; background-color: #FFFFFF;
         }
         .poster-container {
             width: 100%; height: 100%;
-            border: 35px solid {{ theme_color }};
+            border: 35px solid var(--theme-color);
             box-sizing: border-box;
             display: flex; flex-direction: column; justify-content: space-between;
             align-items: center; padding: 1in 0.8in;
         }
         .big-letter {
             font-size: 180px; font-weight: 900;
-            color: {{ theme_color }}; letter-spacing: 4px;
+            color: var(--theme-color); letter-spacing: 4px;
             margin: 0; line-height: 1.1; padding-bottom: 20px;
         }
         .image-container {
@@ -43,7 +44,7 @@
         }
         .word-line {
             font-size: 52px; font-weight: 700;
-            color: {{ theme_color }}; letter-spacing: 2px;
+            color: var(--theme-color); letter-spacing: 2px;
             margin: 0; line-height: 1; white-space: nowrap;
             text-align: center;
         }
@@ -53,7 +54,7 @@
         }
     </style>
 </head>
-<body>
+<body style="--theme-color: {{ theme_color }};">
     <div class="poster-container">
         <div class="big-letter">{{ big_letter }}</div>
         <div class="image-container">

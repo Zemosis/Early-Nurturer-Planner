@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Sparkles, RefreshCw, ArrowRight, AlertCircle } from "lucide-react";
+import { Sparkles, RefreshCw, ArrowRight, AlertCircle, X } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
 import { ThemeDetail } from "../utils/themeData";
 import { ThemeSelectionGrid } from "./ThemeSelectionGrid";
@@ -8,11 +8,14 @@ import { usePlanner } from "../contexts/PlannerContext";
 import { fetchThemePool, refreshThemePool, generatePlan, ThemePoolItem } from "../utils/api";
 import { transformApiThemeToThemeDetail, transformApiPlanToWeekPlan } from "../utils/apiTransformers";
 
+const POLL_INTERVAL_MS = 3000;
+
 interface GenerateWeekModalProps {
   onComplete: (planId?: string) => void;
+  onClose?: () => void;
 }
 
-export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
+export function GenerateWeekModal({ onComplete, onClose }: GenerateWeekModalProps) {
   const [stage, setStage] = useState<
     "loading-pool" | "selection" | "generating-plan" | "error"
   >("loading-pool");
@@ -25,11 +28,14 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
   const [keepMode, setKeepMode] = useState(false);
   const [keepSet, setKeepSet] = useState<Set<string>>(new Set());
   const abortRef = useRef(false);
+  const [isPoolGenerating, setIsPoolGenerating] = useState(false);
+  const [poolSize, setPoolSize] = useState(5);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Map from ThemeDetail.id → pool item UUID for sending to backend
   const [poolIdMap, setPoolIdMap] = useState<Map<string, string>>(new Map());
 
-  const applyPoolToState = (pool: ThemePoolItem[]) => {
+  const applyPoolToState = useCallback((pool: ThemePoolItem[], preserveSelection = false) => {
     setThemePool(pool);
 
     const idMap = new Map<string, string>();
@@ -42,18 +48,46 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
     setThemeOptions(transformed);
     registerDynamicThemes(transformed);
 
-    if (transformed.length > 0) {
+    if (!preserveSelection && transformed.length > 0) {
       setSelectedThemeId(transformed[0].id);
       setThemeFromDetail(transformed[0]);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const pollPool = useCallback(async () => {
+    try {
+      const resp = await fetchThemePool();
+      if (abortRef.current) return;
+      applyPoolToState(resp.themes, true);
+      setPoolSize(resp.pool_size);
+      if (resp.generating) {
+        setIsPoolGenerating(true);
+        pollTimerRef.current = setTimeout(pollPool, POLL_INTERVAL_MS);
+      } else {
+        setIsPoolGenerating(false);
+      }
+    } catch {
+      // Silently retry on next interval
+      if (!abortRef.current) {
+        pollTimerRef.current = setTimeout(pollPool, POLL_INTERVAL_MS);
+      }
+    }
+  }, [applyPoolToState]);
 
   const loadPool = async () => {
     try {
-      const pool = await fetchThemePool();
+      const resp = await fetchThemePool();
       if (abortRef.current) return;
-      applyPoolToState(pool);
+      applyPoolToState(resp.themes);
+      setPoolSize(resp.pool_size);
       setStage("selection");
+
+      // If backend is still generating, start polling
+      if (resp.generating) {
+        setIsPoolGenerating(true);
+        pollTimerRef.current = setTimeout(pollPool, POLL_INTERVAL_MS);
+      }
     } catch (err: any) {
       if (abortRef.current) return;
       setErrorMsg(err.message ?? "Failed to load themes");
@@ -64,7 +98,10 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
   useEffect(() => {
     abortRef.current = false;
     loadPool();
-    return () => { abortRef.current = true; };
+    return () => {
+      abortRef.current = true;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -92,8 +129,9 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
         .map((detailId) => poolIdMap.get(detailId))
         .filter(Boolean) as string[];
 
-      const pool = await refreshThemePool(keepPoolIds);
-      applyPoolToState(pool);
+      const resp = await refreshThemePool(keepPoolIds);
+      applyPoolToState(resp.themes);
+      setPoolSize(resp.pool_size);
       setKeepMode(false);
       setKeepSet(new Set());
     } catch (err: any) {
@@ -148,8 +186,17 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm mx-auto"
+            className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm mx-auto relative"
           >
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="absolute top-3 right-3 p-1.5 hover:bg-muted/20 rounded-lg transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5 text-muted-foreground" />
+              </button>
+            )}
             <div className="flex flex-col items-center text-center">
               <motion.div
                 animate={{ rotate: 360 }}
@@ -179,7 +226,7 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm mx-auto"
+            className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm mx-auto relative"
           >
             <div className="flex flex-col items-center text-center">
               <motion.div
@@ -224,12 +271,22 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
               <p className="text-sm text-muted-foreground mb-4">
                 {errorMsg}
               </p>
-              <button
-                onClick={handleRetry}
-                className="px-6 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-medium transition-colors"
-              >
-                Try Again
-              </button>
+              <div className="flex gap-3">
+                {onClose && (
+                  <button
+                    onClick={onClose}
+                    className="px-6 py-3 bg-muted/40 hover:bg-muted/60 rounded-xl font-medium transition-colors"
+                  >
+                    Close
+                  </button>
+                )}
+                <button
+                  onClick={handleRetry}
+                  className="px-6 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-medium transition-colors"
+                >
+                  Try Again
+                </button>
+              </div>
             </div>
           </motion.div>
         )}
@@ -246,7 +303,16 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
             {/* Header */}
             <div className="sticky top-0 bg-white border-b border-border p-6 z-10 rounded-t-3xl">
               <div className="flex items-start justify-between gap-4">
-                <div>
+                {onClose && (
+                  <button
+                    onClick={onClose}
+                    className="p-1.5 hover:bg-muted/20 rounded-lg transition-colors flex-shrink-0 mt-1"
+                    aria-label="Close"
+                  >
+                    <X className="w-5 h-5 text-muted-foreground" />
+                  </button>
+                )}
+                <div className="flex-1">
                   <h2 className="text-2xl font-medium text-foreground mb-2">
                     {keepMode ? "Keep Your Favorites" : "Choose Your Weekly Theme"}
                   </h2>
@@ -277,11 +343,12 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
                   ) : (
                     <button
                       onClick={() => setKeepMode(true)}
-                      className="flex items-center gap-2 px-4 py-2 bg-muted/50 hover:bg-muted rounded-xl transition-all hover:shadow-md"
+                      disabled={isPoolGenerating}
+                      className="flex items-center gap-2 px-4 py-2 bg-muted/50 hover:bg-muted rounded-xl transition-all hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <RefreshCw className="w-4 h-4 text-foreground" />
+                      <RefreshCw className={`w-4 h-4 text-foreground ${isPoolGenerating ? "animate-spin" : ""}`} />
                       <span className="text-sm font-medium text-foreground hidden sm:inline">
-                        Don't like these?
+                        {isPoolGenerating ? "Generating…" : "Don't like these?"}
                       </span>
                     </button>
                   )}
@@ -300,6 +367,7 @@ export function GenerateWeekModal({ onComplete }: GenerateWeekModalProps) {
                 onSelectTheme={handleSelectTheme}
                 keepMode={keepMode}
                 keepSet={keepSet}
+                skeletonCount={isPoolGenerating ? poolSize - themeOptions.length : 0}
               />
             </div>
 

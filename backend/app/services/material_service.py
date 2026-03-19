@@ -190,21 +190,37 @@ async def _save_material_url(plan_id: uuid.UUID, material_type: str, url: str) -
 #  GENERATORS PER MATERIAL TYPE
 # ══════════════════════════════════════════════════════════════
 
-def _generate_alphabet_pdf(circle_time: dict, theme: str, palette: dict) -> bytes:
+async def _generate_alphabet_pdf(circle_time: dict, theme: str, palette: dict) -> bytes:
     """Generate an alphabet poster PDF."""
     letter = (circle_time.get("letter") or "A").upper()
     letter_word = circle_time.get("letter_word") or FALLBACK_LETTER_WORDS.get(letter, "Apple")
     theme_color = (palette or {}).get("primary", "#387F39")
     big_letter = f"{letter}{letter.lower()}"
 
-    # Generate illustration via Imagen
+    # Generate illustration via Imagen (run in executor to avoid blocking)
+    loop = asyncio.get_event_loop()
     prompt = (
         f"A cute, child-friendly watercolor illustration of a {letter_word} "
         f"for a preschool alphabet poster. Clean white background, "
         f"soft pastel colors, suitable for ages 0-3. "
         f"ABSOLUTELY NO TEXT, NO LETTERS, NO WORDS, AND NO WATERMARKS IN THE IMAGE."
     )
-    image_bytes = _generate_imagen(prompt)
+    image_bytes = await loop.run_in_executor(None, _generate_imagen, prompt)
+
+    # Retry with simpler fallback prompt if first attempt failed (safety filter, etc.)
+    if not image_bytes:
+        logger.warning(
+            "Alphabet image failed for '%s' — retrying with fallback prompt", letter_word
+        )
+        fallback_prompt = (
+            f"A simple, cute watercolor illustration of the letter {letter} "
+            f"for a children's alphabet poster. Clean white background, "
+            f"soft pastel colors. NO TEXT, NO WORDS, NO WATERMARKS."
+        )
+        image_bytes = await loop.run_in_executor(None, _generate_imagen, fallback_prompt)
+        if not image_bytes:
+            logger.warning("Alphabet fallback image also failed for letter %s", letter)
+
     image_url = _image_bytes_to_data_uri(image_bytes) if image_bytes else None
 
     context = {
@@ -288,21 +304,37 @@ def _generate_shape_pdf(circle_time: dict, palette: dict) -> bytes:
     return _render_template_to_pdf("shape_poster.html", context)
 
 
-def _generate_color_pdf(circle_time: dict, palette: dict) -> bytes:
+async def _generate_color_pdf(circle_time: dict, palette: dict) -> bytes:
     """Generate a color poster PDF with an AI-generated themed object."""
     color_name = (circle_time.get("color") or "Blue").strip()
     color_object = circle_time.get("color_object") or f"{color_name.lower()} ball"
     # Use the color hex from the lookup, or fall back to the palette primary
     theme_color = COLOR_HEX_MAP.get(color_name.lower(), (palette or {}).get("primary", "#3498DB"))
 
-    # Generate illustration via Imagen
+    # Generate illustration via Imagen (run in executor to avoid blocking)
+    loop = asyncio.get_event_loop()
     prompt = (
         f"A cute, child-friendly watercolor illustration of a {color_object} "
         f"that is clearly {color_name} colored, for a preschool color poster. "
         f"Clean white background, soft pastel colors, suitable for ages 0-3. "
         f"ABSOLUTELY NO TEXT, NO LETTERS, NO WORDS, AND NO WATERMARKS IN THE IMAGE."
     )
-    image_bytes = _generate_imagen(prompt)
+    image_bytes = await loop.run_in_executor(None, _generate_imagen, prompt)
+
+    # Retry with simpler fallback prompt if first attempt failed
+    if not image_bytes:
+        logger.warning(
+            "Color image failed for '%s' — retrying with fallback prompt", color_object
+        )
+        fallback_prompt = (
+            f"A simple watercolor illustration of a {color_name.lower()} colored object "
+            f"for a children's poster. Clean white background, soft pastel colors. "
+            f"NO TEXT, NO WORDS, NO WATERMARKS."
+        )
+        image_bytes = await loop.run_in_executor(None, _generate_imagen, fallback_prompt)
+        if not image_bytes:
+            logger.warning("Color fallback image also failed for %s", color_name)
+
     image_url = _image_bytes_to_data_uri(image_bytes) if image_bytes else None
 
     context = {
@@ -354,13 +386,13 @@ async def get_or_generate_material(plan_row: WeeklyPlan, material_type: str) -> 
     logger.info("Generating '%s' material for plan %s (theme=%s)", material_type, plan_row.id, theme)
 
     if material_type == "alphabet":
-        pdf_bytes = _generate_alphabet_pdf(circle_time, theme, palette)
+        pdf_bytes = await _generate_alphabet_pdf(circle_time, theme, palette)
     elif material_type == "number":
         pdf_bytes = await _generate_number_pdf(circle_time, theme, palette)
     elif material_type == "shape":
         pdf_bytes = _generate_shape_pdf(circle_time, palette)
     elif material_type == "color":
-        pdf_bytes = _generate_color_pdf(circle_time, palette)
+        pdf_bytes = await _generate_color_pdf(circle_time, palette)
     else:
         raise ValueError(f"Unhandled material_type: {material_type}")
 

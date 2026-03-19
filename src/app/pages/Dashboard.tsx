@@ -379,7 +379,7 @@ export default function Dashboard() {
       </main>
 
       {/* Modals & Assistants */}
-      {showGenerateModal && <GenerateWeekModal onComplete={handleGenerateComplete} />}
+      {showGenerateModal && <GenerateWeekModal onComplete={handleGenerateComplete} onClose={() => setShowGenerateModal(false)} />}
       <ChatAssistant isOpen={isChatOpen} onToggle={() => setIsChatOpen(!isChatOpen)} />
     </div>
   );

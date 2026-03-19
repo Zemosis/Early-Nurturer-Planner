@@ -15,9 +15,15 @@ export interface ThemePoolItem {
   theme_data: Record<string, unknown>;
 }
 
+export interface ThemePoolResponse {
+  themes: ThemePoolItem[];
+  generating: boolean;
+  pool_size: number;
+}
+
 export async function fetchThemePool(
   userId: string = DEFAULT_USER_ID
-): Promise<ThemePoolItem[]> {
+): Promise<ThemePoolResponse> {
   const res = await fetch(`${API_BASE}/api/theme-pool/${userId}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -29,7 +35,7 @@ export async function fetchThemePool(
 export async function refreshThemePool(
   keepIds: string[],
   userId: string = DEFAULT_USER_ID
-): Promise<ThemePoolItem[]> {
+): Promise<ThemePoolResponse> {
   const res = await fetch(`${API_BASE}/api/theme-pool/${userId}/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

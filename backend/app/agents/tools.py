@@ -130,6 +130,7 @@ Rules:
 async def generate_theme_options(
     student_context: str,
     count: int = 5,
+    existing_themes: list[str] | None = None,
 ) -> list[ThemeSchema]:
     """Generate unique weekly theme options using Vertex AI / Gemini.
 
@@ -142,6 +143,9 @@ async def generate_theme_options(
         student_context: A formatted string describing the enrolled students
             (typically produced by fetch_student_context).
         count: Number of unique themes to generate (default 5).
+        existing_themes: Names of themes already in the user's pool or
+            recently used in plans. The AI is instructed to avoid these
+            and any semantically similar concepts.
 
     Returns:
         A list of ThemeSchema instances parsed from the AI response.
@@ -149,10 +153,25 @@ async def generate_theme_options(
     Raises:
         ValueError: If the AI returns an empty or unparseable response.
     """
+    exclusion_block = ""
+    if existing_themes:
+        names = ", ".join(f'"{n}"' for n in existing_themes)
+        exclusion_block = (
+            f"\n\nCRITICAL UNIQUENESS CONSTRAINT:\n"
+            f"The following themes already exist and MUST NOT be repeated, "
+            f"paraphrased, or conceptually duplicated: [{names}].\n"
+            f"Do NOT use synonyms, related concepts, or slight variations of "
+            f"any of these themes. For example, if 'Ocean' exists you cannot "
+            f"generate 'Beach', 'Sea Life', 'Under the Sea', or 'Marine "
+            f"Adventures'. Each new theme must come from a completely "
+            f"different domain or concept."
+        )
+
     user_prompt = (
         f"Here is the current classroom roster:\n\n"
         f"{student_context}\n\n"
         f"Generate exactly {count} unique weekly themes for this classroom."
+        f"{exclusion_block}"
     )
 
     response = await gemini_client.aio.models.generate_content(

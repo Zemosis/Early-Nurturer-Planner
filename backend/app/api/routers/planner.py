@@ -7,12 +7,13 @@ selected theme and the pipeline returns a fully personalised,
 safety-audited weekly curriculum plan.
 """
 
+import asyncio
 import io
 import logging
 import uuid
 from datetime import date, timedelta
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, update as sa_update
@@ -22,7 +23,11 @@ from app.db.database import async_session_factory
 from app.db.models import WeeklyPlan, ThemePool
 from app.services.image_service import get_or_generate_cover_image
 from app.services.material_service import get_or_generate_material, VALID_MATERIAL_TYPES
-from app.services.pdf_service import generate_weekly_pdf, upload_pdf_to_gcs, save_pdf_url, delete_pdf_from_gcs
+from app.services.pdf_service import (
+    generate_weekly_pdf, upload_pdf_to_gcs, save_pdf_url,
+    delete_pdf_from_gcs, delete_plan_assets_from_gcs,
+)
+from app.api.routers.theme_pool import refill_theme_pool_bg
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +77,12 @@ def _compute_week_info(today: date | None = None) -> dict:
 
 
 @router.post("/generate")
-async def generate_plan(request: GeneratePlanRequest):
+async def generate_plan(request: GeneratePlanRequest, background_tasks: BackgroundTasks):
     """Trigger the full Architect → Auditor → Personalizer pipeline.
 
     Auto-computes calendar week info from today's date.
-    Marks the selected theme as used in the pool (if theme_pool_id given).
+    Marks the selected theme as used in the pool (if theme_pool_id given)
+    and kicks off a background task to refill the theme pool.
 
     Returns:
         A dict with status, the personalised plan, and the saved plan_id.
@@ -110,6 +116,9 @@ async def generate_plan(request: GeneratePlanRequest):
                     await session.commit()
             except Exception as e:
                 logger.warning("Failed to mark pool theme as used: %s", e)
+
+    # Kick off background theme pool refill immediately (don't wait for plan gen)
+    background_tasks.add_task(refill_theme_pool_bg, user_uid)
 
     # Offset week info so plan N starts N-1 weeks from today,
     # giving each curriculum week a distinct real-world date range
@@ -376,23 +385,12 @@ async def delete_plan(user_id: str, plan_id: str):
         if not plan_row:
             raise HTTPException(status_code=404, detail="Plan not found.")
 
-        # Clean up GCS assets before deleting DB row
-        if plan_row.pdf_url:
-            try:
-                delete_pdf_from_gcs(plan_row.pdf_url)
-            except Exception as e:
-                logger.warning("Failed to delete curriculum PDF from GCS: %s", e)
-        if plan_row.cover_image_url:
-            try:
-                delete_pdf_from_gcs(plan_row.cover_image_url)
-            except Exception as e:
-                logger.warning("Failed to delete cover image from GCS: %s", e)
-        for url in (plan_row.material_urls or {}).values():
-            if url:
-                try:
-                    delete_pdf_from_gcs(url)
-                except Exception as e:
-                    logger.warning("Failed to delete material PDF from GCS: %s", e)
+        # Clean up ALL GCS assets via prefix-based deletion
+        try:
+            deleted_count = delete_plan_assets_from_gcs(plan_uid)
+            logger.info("Deleted %d GCS blobs for plan %s", deleted_count, plan_id)
+        except Exception as e:
+            logger.warning("GCS cleanup failed for plan %s: %s", plan_id, e)
 
         # Delete it
         await session.delete(plan_row)
@@ -471,7 +469,7 @@ async def download_plan_pdf(user_id: str, week_number: int):
     }
 
     try:
-        pdf_bytes = await generate_weekly_pdf(curriculum_data)
+        pdf_bytes = await generate_weekly_pdf(curriculum_data, plan_id=plan_row.id)
     except Exception as e:
         logger.error("PDF generation failed: %s", e)
         raise HTTPException(
@@ -551,7 +549,7 @@ async def download_plan_pdf_by_id(user_id: str, plan_id: str):
     }
 
     try:
-        pdf_bytes = await generate_weekly_pdf(curriculum_data)
+        pdf_bytes = await generate_weekly_pdf(curriculum_data, plan_id=plan_uid)
     except Exception as e:
         logger.error("PDF generation failed for plan %s: %s", plan_id, e)
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
@@ -623,7 +621,7 @@ async def regenerate_plan_pdf(user_id: str, plan_id: str):
     }
 
     try:
-        pdf_bytes = await generate_weekly_pdf(curriculum_data)
+        pdf_bytes = await generate_weekly_pdf(curriculum_data, plan_id=plan_uid)
     except Exception as e:
         logger.error("PDF regeneration failed for plan %s: %s", plan_id, e)
         raise HTTPException(status_code=500, detail=f"PDF regeneration failed: {e}")

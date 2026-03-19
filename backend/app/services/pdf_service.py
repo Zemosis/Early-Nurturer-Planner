@@ -87,13 +87,15 @@ def _fetch_image_as_data_uri(url: str) -> str | None:
         return None
 
 
-async def generate_weekly_pdf(curriculum_data: dict) -> bytes:
+async def generate_weekly_pdf(curriculum_data: dict, plan_id: "uuid.UUID | None" = None) -> bytes:
     """Render a weekly curriculum plan as a PDF document.
 
     Args:
         curriculum_data: A dictionary matching the WeekPlanSchema structure.
             Expected keys: theme, theme_emoji, week_number, week_range,
             palette, domains, objectives, circle_time, daily_plans, newsletter.
+        plan_id: Optional plan UUID — passed to daily image generation for
+            proper GCS blob naming (enables prefix-based deletion).
 
     Returns:
         The PDF file contents as raw bytes.
@@ -120,7 +122,7 @@ async def generate_weekly_pdf(curriculum_data: dict) -> bytes:
         day_name = day_plan.get("day", "Day")
         activities = day_plan.get("activities", [])
         summary = activities[0].get("title", "activities") if activities else "learning"
-        tasks.append(get_or_generate_daily_image(theme, day_name, summary))
+        tasks.append(get_or_generate_daily_image(theme, day_name, summary, plan_id=plan_id))
     daily_image_urls = await asyncio.gather(*tasks)
 
     # Convert each daily image URL to a data URI
@@ -230,3 +232,39 @@ def delete_pdf_from_gcs(pdf_url: str) -> None:
         logger.info("Deleted PDF blob from GCS: %s", blob_name)
     except Exception as e:
         logger.error("Failed to delete PDF from GCS (%s): %s", pdf_url, e)
+
+
+def delete_plan_assets_from_gcs(plan_id: uuid.UUID) -> int:
+    """Delete ALL GCS blobs associated with a plan using prefix search.
+
+    Searches across curriculum_pdfs/, theme_covers/, and weekly-materials/
+    for any blob whose name contains the plan_id. This catches PDFs,
+    cover images, daily illustrations, and material posters.
+
+    Returns:
+        Number of blobs deleted.
+    """
+    plan_str = str(plan_id)
+    folders = [GCS_PDF_FOLDER, "theme_covers", "weekly-materials"]
+    deleted = 0
+
+    try:
+        client = storage.Client(project=settings.GCP_PROJECT_ID)
+        bucket = client.bucket(settings.GCS_BUCKET_NAME)
+
+        for folder in folders:
+            prefix = f"{folder}/{plan_str}"
+            blobs = list(bucket.list_blobs(prefix=prefix))
+            for blob in blobs:
+                try:
+                    blob.delete()
+                    deleted += 1
+                    logger.info("Deleted GCS blob: %s", blob.name)
+                except Exception as e:
+                    logger.warning("Failed to delete blob %s: %s", blob.name, e)
+
+        logger.info("Prefix deletion for plan %s: removed %d blobs", plan_id, deleted)
+    except Exception as e:
+        logger.error("GCS prefix deletion failed for plan %s: %s", plan_id, e)
+
+    return deleted

@@ -131,13 +131,16 @@ async def get_or_generate_cover_image(plan_row: WeeklyPlan) -> str | None:
     return public_url
 
 
-async def get_or_generate_daily_image(theme: str, day_name: str, day_summary: str) -> str | None:
+async def get_or_generate_daily_image(
+    theme: str, day_name: str, day_summary: str, plan_id: uuid.UUID | None = None,
+) -> str | None:
     """Generate a portrait-aspect-ratio daily theme illustration via Imagen.
 
     Args:
         theme: The weekly theme (e.g., "Gentle Rain")
         day_name: Day of the week (e.g., "Monday")
         day_summary: Brief summary of the day's focus
+        plan_id: UUID of the plan (used to prefix blob names for clean deletion)
 
     Returns:
         The public GCS URL to the daily image, or None if generation failed.
@@ -174,10 +177,13 @@ async def get_or_generate_daily_image(theme: str, day_name: str, day_summary: st
         logger.warning("Imagen returned empty image bytes for %s", day_name)
         return None
 
-    # Upload to GCS with a unique name
+    # Upload to GCS — prefix with plan_id for clean bulk deletion
     safe_day = day_name.lower().replace(" ", "-")
     safe_theme = theme.lower().replace(" ", "-")[:30]
-    blob_name = f"{GCS_FOLDER}/daily_{safe_theme}_{safe_day}_{uuid.uuid4().hex[:8]}.png"
+    if plan_id:
+        blob_name = f"{GCS_FOLDER}/{plan_id}_daily_{safe_day}.png"
+    else:
+        blob_name = f"{GCS_FOLDER}/daily_{safe_theme}_{safe_day}_{uuid.uuid4().hex[:8]}.png"
     
     try:
         public_url = _upload_bytes_to_gcs(image_bytes, blob_name)

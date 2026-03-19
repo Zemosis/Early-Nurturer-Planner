@@ -18,6 +18,7 @@ interface ThemeSelectionGridProps {
   enableHoverPreview?: boolean;
   keepMode?: boolean;
   keepSet?: Set<string>;
+  skeletonCount?: number;
 }
 
 export function ThemeSelectionGrid({
@@ -27,6 +28,7 @@ export function ThemeSelectionGrid({
   enableHoverPreview = true,
   keepMode = false,
   keepSet,
+  skeletonCount = 0,
 }: ThemeSelectionGridProps) {
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const { previewTheme } = useTheme();
@@ -76,7 +78,6 @@ export function ThemeSelectionGrid({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {themes.map((theme, index) => {
           const isSelected = theme.id === selectedThemeId;
-          const isPreviewed = theme.id === previewThemeId;
           const isKept = keepMode && keepSet?.has(theme.id);
 
           return (
@@ -209,6 +210,53 @@ export function ThemeSelectionGrid({
             </motion.button>
           );
         })}
+
+        {/* Skeleton placeholder cards for themes being generated */}
+        {Array.from({ length: Math.max(0, skeletonCount) }).map((_, i) => (
+          <motion.div
+            key={`skeleton-${i}`}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: (themes.length + i) * 0.1, duration: 0.3 }}
+            className="relative rounded-2xl border-2 border-dashed border-muted-foreground/20 p-5 bg-muted/30"
+          >
+            {/* Pulsing shimmer overlay */}
+            <div className="animate-pulse space-y-4">
+              {/* Header skeleton */}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-muted-foreground/10" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-3/4 rounded bg-muted-foreground/10" />
+                  <div className="h-3 w-1/2 rounded bg-muted-foreground/10" />
+                </div>
+              </div>
+
+              {/* Tagline skeleton */}
+              <div className="h-6 w-2/3 rounded-lg bg-muted-foreground/10" />
+
+              {/* Palette skeleton */}
+              <div className="space-y-2">
+                <div className="h-3 w-1/3 rounded bg-muted-foreground/10" />
+                <div className="flex gap-2">
+                  {[1, 2, 3].map((j) => (
+                    <div key={j} className="w-10 h-10 rounded-lg bg-muted-foreground/10 flex-1" />
+                  ))}
+                </div>
+              </div>
+
+              {/* Mood skeleton */}
+              <div className="h-3 w-full rounded bg-muted-foreground/10" />
+            </div>
+
+            {/* Centered generating label */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-white/80 rounded-full shadow-sm">
+                <Sparkles className="w-3.5 h-3.5 text-muted-foreground animate-pulse" />
+                <span className="text-xs font-medium text-muted-foreground">Generating…</span>
+              </div>
+            </div>
+          </motion.div>
+        ))}
       </div>
     </div>
   );
