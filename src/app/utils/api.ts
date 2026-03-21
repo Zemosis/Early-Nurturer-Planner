@@ -251,6 +251,7 @@ export async function regeneratePlanPDF(
 // ── Material Poster Download ─────────────────────────────────
 
 export type MaterialType = 'alphabet' | 'number' | 'shape' | 'color';
+export type BulkMaterialType = MaterialType | 'days_of_the_week' | 'months_of_the_year' | 'weather';
 
 export async function downloadMaterial(
   planId: string,
@@ -268,4 +269,92 @@ export async function downloadMaterial(
 
   const data = await res.json();
   return data.url;
+}
+
+// ── YouTube Search ──────────────────────────────────────────
+
+export interface YouTubeSearchResult {
+  embed_url: string;
+  title: string;
+  duration: string;
+  duration_seconds: number;
+  thumbnail: string;
+}
+
+export async function searchYouTube(
+  query: string,
+  excludeId?: string
+): Promise<YouTubeSearchResult> {
+  const params = new URLSearchParams({ q: query });
+  if (excludeId) params.set("exclude_id", excludeId);
+
+  const res = await fetch(`${API_BASE}/api/planner/youtube/search?${params}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    console.error("YouTube search failed:", res.status, err);
+    throw new Error(err.detail ?? "YouTube search failed");
+  }
+  return res.json();
+}
+
+// ── Circle Time Song Update ─────────────────────────────────
+
+export interface SongUpdate {
+  title: string;
+  youtube_url: string;
+  duration: string;
+}
+
+export interface CircleTimeUpdatePayload {
+  greeting_song?: SongUpdate;
+  goodbye_song?: SongUpdate;
+}
+
+export async function updateCircleTimeSongs(
+  planId: string,
+  payload: CircleTimeUpdatePayload,
+  userId: string = DEFAULT_USER_ID
+): Promise<{ status: string; circle_time: Record<string, unknown> }> {
+  const res = await fetch(
+    `${API_BASE}/api/planner/${userId}/plan/${planId}/circle-time`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Circle time update failed");
+  }
+  return res.json();
+}
+
+// ── Bulk Material Export ────────────────────────────────────
+
+export async function bulkExportMaterials(
+  planId: string,
+  materialTypes: BulkMaterialType[],
+  userId: string = DEFAULT_USER_ID
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(
+    `${API_BASE}/api/planner/${userId}/plan/${planId}/materials/bulk-export`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ material_types: materialTypes }),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Bulk export failed");
+  }
+
+  // Extract filename from Content-Disposition header
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+  const filename = filenameMatch?.[1] ?? "Materials_Bundle.pdf";
+
+  const blob = await res.blob();
+  return { blob, filename };
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft, MessageCircle, Loader2 } from "lucide-react";
+import { ArrowLeft, MessageCircle, Loader2, Sparkles } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { ChatAssistant } from "../components/ChatAssistant";
 import { OverviewTab } from "../components/tabs/OverviewTab";
 import { CircleTimeTab } from "../components/tabs/CircleTimeTab";
@@ -202,7 +203,7 @@ export default function WeeklyPlan() {
 
         {activeTab === "overview" && <OverviewTab week={week} />}
         {activeTab === "schedule" && <DailyScheduleTab week={week} />}
-        {activeTab === "circle" && <CircleTimeTab week={week} planId={weekId} />}
+        {activeTab === "circle" && <CircleTimeTab week={week} planId={weekId} onWeekUpdate={setCurrentPlan} />}
         {activeTab === "activities" && <ThemeActivitiesTab week={week} />}
         {activeTab === "materials" && <MaterialsTab week={week} planId={weekId} />}
         {activeTab === "newsletter" && <NewsletterTab week={week} />}
@@ -213,6 +214,48 @@ export default function WeeklyPlan() {
         isOpen={isChatOpen}
         onToggle={() => setIsChatOpen(!isChatOpen)}
       />
+
+      {/* Theme Swap Loading Overlay */}
+      <AnimatePresence>
+        {swapLoading && (
+          <motion.div
+            key="swap-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm mx-auto"
+            >
+              <div className="flex flex-col items-center text-center">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                  className="w-16 h-16 rounded-full flex items-center justify-center mb-4 theme-transition"
+                  style={{ backgroundColor: "var(--theme-primary-light)" }}
+                >
+                  <Sparkles
+                    className="w-8 h-8 theme-transition"
+                    style={{ color: "var(--theme-primary)" }}
+                  />
+                </motion.div>
+                <h3 className="text-xl font-medium text-foreground mb-2">
+                  Switching theme…
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Building your new curriculum plan.
+                  <br />
+                  This may take up to 2 minutes.
+                </p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

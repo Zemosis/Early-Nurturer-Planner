@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { Music, ChevronDown, ChevronUp, Clock, Play, Download, Loader2, ExternalLink, FileText } from "lucide-react";
+import { Music, ChevronDown, ChevronUp, Clock, Play, Download, Loader2, ExternalLink, FileText, Search, RefreshCw, Check, X } from "lucide-react";
 import { WeekPlan } from "../../utils/mockData";
 import { YogaSection } from "../circle-time/YogaSection";
 import { MusicMovementSection } from "../circle-time/MusicMovementSection";
-import { downloadMaterial, MaterialType } from "../../utils/api";
+import { downloadMaterial, MaterialType, searchYouTube, updateCircleTimeSongs, YouTubeSearchResult } from "../../utils/api";
 
 interface CircleTimeTabProps {
   week: WeekPlan;
   planId?: string;
+  onWeekUpdate?: (plan: WeekPlan | null) => void;
 }
 
 const routineItems = [
@@ -44,11 +45,87 @@ const STATIC_MATERIALS = [
   },
 ];
 
-export function CircleTimeTab({ week, planId }: CircleTimeTabProps) {
+export function CircleTimeTab({ week, planId, onWeekUpdate }: CircleTimeTabProps) {
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [loadingMaterial, setLoadingMaterial] = useState<MaterialType | null>(null);
   const [materialError, setMaterialError] = useState<string | null>(null);
   const [generatedUrls, setGeneratedUrls] = useState<Partial<Record<MaterialType, string>>>({});
+
+  // ── Change Song state ───────────────────────────────────
+  const [changingSong, setChangingSong] = useState<'greeting' | 'goodbye' | null>(null);
+  const [songQuery, setSongQuery] = useState('');
+  const [songSearching, setSongSearching] = useState(false);
+  const [songResult, setSongResult] = useState<YouTubeSearchResult | null>(null);
+  const [songSaving, setSongSaving] = useState(false);
+  const [songError, setSongError] = useState<string | null>(null);
+
+  const openChangeSong = (type: 'greeting' | 'goodbye') => {
+    setChangingSong(type);
+    setSongQuery(type === 'greeting' ? 'good morning preschool kids song' : 'goodbye preschool kids song');
+    setSongResult(null);
+    setSongError(null);
+  };
+
+  const closeChangeSong = () => {
+    setChangingSong(null);
+    setSongQuery('');
+    setSongResult(null);
+    setSongError(null);
+  };
+
+  const handleSongSearch = async () => {
+    if (!songQuery.trim()) return;
+    setSongSearching(true);
+    setSongError(null);
+    setSongResult(null);
+    try {
+      const result = await searchYouTube(songQuery.trim());
+      setSongResult(result);
+    } catch (err: any) {
+      setSongError(err.message ?? 'Search failed');
+    } finally {
+      setSongSearching(false);
+    }
+  };
+
+  const handleConfirmSong = async () => {
+    if (!songResult || !planId || !changingSong) return;
+    setSongSaving(true);
+    setSongError(null);
+    try {
+      const songData = {
+        title: songResult.title,
+        youtube_url: songResult.embed_url,
+        duration: songResult.duration,
+      };
+      const payload = changingSong === 'greeting'
+        ? { greeting_song: songData }
+        : { goodbye_song: songData };
+
+      await updateCircleTimeSongs(planId, payload);
+
+      // Update local state
+      const updatedWeek = { ...week };
+      const songField = changingSong === 'greeting' ? 'greetingSong' : 'goodbyeSong';
+      updatedWeek.circleTime = {
+        ...updatedWeek.circleTime,
+        [songField]: {
+          ...updatedWeek.circleTime[songField],
+          title: songResult.title,
+          videoUrl: songResult.embed_url,
+          duration: songResult.duration,
+        },
+      };
+      // Clear cached PDF URL since it's been invalidated
+      updatedWeek.pdfUrl = undefined;
+      onWeekUpdate?.(updatedWeek);
+      closeChangeSong();
+    } catch (err: any) {
+      setSongError(err.message ?? 'Failed to save song');
+    } finally {
+      setSongSaving(false);
+    }
+  };
 
   const handleDownloadMaterial = async (type: MaterialType) => {
     if (!planId) return;
@@ -243,12 +320,74 @@ export function CircleTimeTab({ week, planId }: CircleTimeTabProps) {
             />
           </div>
 
-          <div className="p-4 bg-muted/5">
-            <p className="text-xs font-medium text-muted-foreground mb-2">Educator Script</p>
-            <pre className="text-sm text-foreground whitespace-pre-wrap font-sans">
-              {week.circleTime.greetingSong.script}
-            </pre>
+          <div className="p-4 bg-muted/5 flex items-center justify-between">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Educator Script</p>
+              <pre className="text-sm text-foreground whitespace-pre-wrap font-sans">
+                {week.circleTime.greetingSong.script}
+              </pre>
+            </div>
+            <button
+              onClick={() => openChangeSong('greeting')}
+              className="flex-shrink-0 ml-3 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted/30 transition-colors text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Change Song
+            </button>
           </div>
+
+          {/* Inline Change Song Panel — Greeting */}
+          {changingSong === 'greeting' && (
+            <div className="p-4 border-t border-border bg-muted/10">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium text-foreground">Search for a new greeting song</p>
+                <button onClick={closeChangeSong} className="p-1 hover:bg-muted/30 rounded-lg transition-colors">
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={songQuery}
+                  onChange={(e) => setSongQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSongSearch()}
+                  placeholder="Search YouTube…"
+                  className="flex-1 px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <button
+                  onClick={handleSongSearch}
+                  disabled={songSearching || !songQuery.trim()}
+                  className="px-3 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-colors"
+                  style={{ backgroundColor: 'var(--theme-primary)' }}
+                >
+                  {songSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                </button>
+              </div>
+              {songError && <p className="text-xs text-red-600 mb-2">{songError}</p>}
+              {songResult && (
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <div className="flex items-center gap-3 p-3">
+                    {songResult.thumbnail && (
+                      <img src={songResult.thumbnail} alt="" className="w-20 h-14 object-cover rounded" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{songResult.title}</p>
+                      <p className="text-xs text-muted-foreground">{songResult.duration}</p>
+                    </div>
+                    <button
+                      onClick={handleConfirmSong}
+                      disabled={songSaving}
+                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors disabled:opacity-50"
+                      style={{ backgroundColor: 'var(--theme-primary)' }}
+                    >
+                      {songSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      {songSaving ? 'Saving…' : 'Use This'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Goodbye Song */}
@@ -281,12 +420,74 @@ export function CircleTimeTab({ week, planId }: CircleTimeTabProps) {
             />
           </div>
 
-          <div className="p-4 bg-muted/5">
-            <p className="text-xs font-medium text-muted-foreground mb-2">Educator Script</p>
-            <pre className="text-sm text-foreground whitespace-pre-wrap font-sans">
-              {week.circleTime.goodbyeSong.script}
-            </pre>
+          <div className="p-4 bg-muted/5 flex items-center justify-between">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Educator Script</p>
+              <pre className="text-sm text-foreground whitespace-pre-wrap font-sans">
+                {week.circleTime.goodbyeSong.script}
+              </pre>
+            </div>
+            <button
+              onClick={() => openChangeSong('goodbye')}
+              className="flex-shrink-0 ml-3 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted/30 transition-colors text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Change Song
+            </button>
           </div>
+
+          {/* Inline Change Song Panel — Goodbye */}
+          {changingSong === 'goodbye' && (
+            <div className="p-4 border-t border-border bg-muted/10">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium text-foreground">Search for a new goodbye song</p>
+                <button onClick={closeChangeSong} className="p-1 hover:bg-muted/30 rounded-lg transition-colors">
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={songQuery}
+                  onChange={(e) => setSongQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSongSearch()}
+                  placeholder="Search YouTube…"
+                  className="flex-1 px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <button
+                  onClick={handleSongSearch}
+                  disabled={songSearching || !songQuery.trim()}
+                  className="px-3 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-colors"
+                  style={{ backgroundColor: 'var(--theme-primary)' }}
+                >
+                  {songSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                </button>
+              </div>
+              {songError && <p className="text-xs text-red-600 mb-2">{songError}</p>}
+              {songResult && (
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <div className="flex items-center gap-3 p-3">
+                    {songResult.thumbnail && (
+                      <img src={songResult.thumbnail} alt="" className="w-20 h-14 object-cover rounded" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{songResult.title}</p>
+                      <p className="text-xs text-muted-foreground">{songResult.duration}</p>
+                    </div>
+                    <button
+                      onClick={handleConfirmSong}
+                      disabled={songSaving}
+                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors disabled:opacity-50"
+                      style={{ backgroundColor: 'var(--theme-primary)' }}
+                    >
+                      {songSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      {songSaving ? 'Saving…' : 'Use This'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

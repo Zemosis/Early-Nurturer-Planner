@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, update as sa_update
 
 from app.agents.graph import build_planner_graph
+from app.agents.tools import search_youtube_video
 from app.db.database import async_session_factory
 from app.db.models import WeeklyPlan, ThemePool
 from app.services.image_service import get_or_generate_cover_image
@@ -74,6 +75,31 @@ def _compute_week_info(today: date | None = None) -> dict:
 
 
 # ── Endpoints ─────────────────────────────────────────────────
+
+
+@router.get("/youtube/search")
+async def youtube_search(q: str, exclude_id: str | None = None):
+    """Search YouTube for a kid-safe video. Used by the Change Song UI.
+
+    Defined BEFORE parameterized /{user_id}/… routes to avoid
+    any routing ambiguity in FastAPI/Starlette.
+    """
+    if not q or len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Query too short")
+
+    exclude = [exclude_id] if exclude_id else None
+    try:
+        result = await search_youtube_video(
+            q, video_category_id="10", exclude_video_ids=exclude,
+        )
+    except Exception as e:
+        logger.error("YouTube search endpoint failed for q=%r: %s", q, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"YouTube search error: {e}")
+
+    if not result:
+        logger.warning("YouTube search returned no results for q=%r", q)
+        raise HTTPException(status_code=404, detail="No suitable video found")
+    return result
 
 
 @router.post("/generate")
@@ -553,6 +579,7 @@ async def get_plan(user_id: str, plan_id: str):
         "newsletter": plan_row.newsletter,
         "cover_image_url": plan_row.cover_image_url,
         "pdf_url": plan_row.pdf_url,
+        "material_urls": plan_row.material_urls,
     }
 
 
@@ -893,6 +920,207 @@ async def get_material_poster(user_id: str, plan_id: str, material_type: str):
             )
 
     return {"url": url}
+
+
+# ── Phase 2: Editable Circle Time Songs ─────────────────────
+
+
+class CircleTimeSongUpdate(BaseModel):
+    """Payload for updating a single circle-time song."""
+    title: str
+    youtube_url: str
+    duration: str
+
+
+class CircleTimeUpdateRequest(BaseModel):
+    """Payload for PATCH /circle-time."""
+    greeting_song: CircleTimeSongUpdate | None = None
+    goodbye_song: CircleTimeSongUpdate | None = None
+
+
+@router.patch("/{user_id}/plan/{plan_id}/circle-time")
+async def update_circle_time(user_id: str, plan_id: str, body: CircleTimeUpdateRequest):
+    """Update greeting/goodbye songs and invalidate the cached curriculum PDF."""
+    try:
+        user_uid = uuid.UUID(user_id)
+        plan_uid = uuid.UUID(plan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id or plan_id")
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(WeeklyPlan).where(
+                WeeklyPlan.id == plan_uid,
+                WeeklyPlan.user_id == user_uid,
+            )
+        )
+        plan_row = result.scalar_one_or_none()
+        if not plan_row:
+            raise HTTPException(status_code=404, detail="Plan not found.")
+
+        circle_time = dict(plan_row.circle_time or {})
+
+        if body.greeting_song:
+            gs = circle_time.get("greeting_song", {})
+            gs["title"] = body.greeting_song.title
+            gs["youtube_url"] = body.greeting_song.youtube_url
+            gs["duration"] = body.greeting_song.duration
+            circle_time["greeting_song"] = gs
+
+        if body.goodbye_song:
+            gbs = circle_time.get("goodbye_song", {})
+            gbs["title"] = body.goodbye_song.title
+            gbs["youtube_url"] = body.goodbye_song.youtube_url
+            gbs["duration"] = body.goodbye_song.duration
+            circle_time["goodbye_song"] = gbs
+
+        # Cache invalidation: delete old curriculum PDF from GCS
+        if plan_row.pdf_url:
+            logger.info("Invalidating cached PDF for plan %s", plan_id)
+            try:
+                delete_pdf_from_gcs(plan_row.pdf_url)
+            except Exception as e:
+                logger.warning("Failed to delete cached PDF: %s", e)
+
+        await session.execute(
+            sa_update(WeeklyPlan)
+            .where(WeeklyPlan.id == plan_uid)
+            .values(circle_time=circle_time, pdf_url=None)
+        )
+        await session.commit()
+
+    logger.info("Updated circle-time songs for plan %s", plan_id)
+    return {"status": "updated", "circle_time": circle_time}
+
+
+# ── Phase 3: Bulk PDF Export ────────────────────────────────
+
+
+# Static material GCS URLs (same as frontend constants)
+_STATIC_MATERIAL_URLS: dict[str, tuple[str, str]] = {
+    "days_of_the_week": (
+        "Days of the Week",
+        "https://storage.googleapis.com/early-nurturer-planner-assets/static-materials/days_of_the_week.pdf",
+    ),
+    "months_of_the_year": (
+        "Months of the Year",
+        "https://storage.googleapis.com/early-nurturer-planner-assets/static-materials/months_of_the_year.pdf",
+    ),
+    "weather": (
+        "Types of Weather",
+        "https://storage.googleapis.com/early-nurturer-planner-assets/static-materials/weather.pdf",
+    ),
+}
+
+# Combined valid types for bulk export
+_ALL_BULK_TYPES = VALID_MATERIAL_TYPES | set(_STATIC_MATERIAL_URLS.keys())
+
+
+class BulkExportRequest(BaseModel):
+    material_types: list[str]
+
+
+@router.post("/{user_id}/plan/{plan_id}/materials/bulk-export")
+async def bulk_export_materials(user_id: str, plan_id: str, body: BulkExportRequest):
+    """Merge selected material PDFs into one download.
+
+    Supports dynamic types (alphabet, number, shape, color) and static
+    types (days_of_the_week, months_of_the_year, weather).
+    Degrades gracefully — if one dynamic PDF fails, the rest are still merged.
+    """
+    import httpx as _httpx
+    from pypdf import PdfWriter, PdfReader
+
+    requested = body.material_types
+    if not requested:
+        raise HTTPException(status_code=400, detail="No material_types provided")
+
+    invalid = [t for t in requested if t not in _ALL_BULK_TYPES]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid types: {invalid}. Valid: {sorted(_ALL_BULK_TYPES)}",
+        )
+
+    try:
+        user_uid = uuid.UUID(user_id)
+        plan_uid = uuid.UUID(plan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id or plan_id")
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(WeeklyPlan).where(
+                WeeklyPlan.id == plan_uid,
+                WeeklyPlan.user_id == user_uid,
+            )
+        )
+        plan_row = result.scalar_one_or_none()
+        if not plan_row:
+            raise HTTPException(status_code=404, detail="Plan not found.")
+
+        pdf_buffers: list[tuple[str, bytes]] = []
+
+        async with _httpx.AsyncClient(timeout=30.0, follow_redirects=True) as http:
+            for mat_type in requested:
+                try:
+                    if mat_type in VALID_MATERIAL_TYPES:
+                        # Dynamic: generate or fetch from cache
+                        url = await get_or_generate_material(plan_row, mat_type)
+                        resp = await http.get(url)
+                        resp.raise_for_status()
+                        pdf_buffers.append((mat_type, resp.content))
+                    else:
+                        # Static: download from known GCS URL
+                        label, static_url = _STATIC_MATERIAL_URLS[mat_type]
+                        resp = await http.get(static_url)
+                        resp.raise_for_status()
+                        pdf_buffers.append((mat_type, resp.content))
+                except Exception as e:
+                    logger.error(
+                        "Bulk export: failed to get '%s' for plan %s: %s",
+                        mat_type, plan_id, e,
+                    )
+                    # Graceful degradation — skip this one
+
+    if not pdf_buffers:
+        raise HTTPException(
+            status_code=500,
+            detail="All requested materials failed to generate.",
+        )
+
+    # Merge PDFs with pypdf
+    writer = PdfWriter()
+    for _label, pdf_bytes in pdf_buffers:
+        try:
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+            for page in reader.pages:
+                writer.add_page(page)
+        except Exception as e:
+            logger.error("Bulk export: failed to merge '%s': %s", _label, e)
+
+    merged_buf = io.BytesIO()
+    writer.write(merged_buf)
+    merged_buf.seek(0)
+
+    # Build filename
+    safe_theme = (plan_row.theme or "Plan").replace(" ", "_")
+    if len(pdf_buffers) == 1:
+        # Single item — use its name
+        single_type = pdf_buffers[0][0]
+        if single_type in _STATIC_MATERIAL_URLS:
+            name = _STATIC_MATERIAL_URLS[single_type][0].replace(" ", "_")
+        else:
+            name = single_type.capitalize()
+        filename = f"{name}.pdf"
+    else:
+        filename = f"{safe_theme}_Materials_Bundle.pdf"
+
+    return StreamingResponse(
+        merged_buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _rebuild_daily_plans(activities: list[dict]) -> list[dict]:

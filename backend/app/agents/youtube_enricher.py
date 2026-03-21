@@ -69,11 +69,11 @@ def _build_song_query(song_title: str, song_type: str, theme: str) -> str:
     theme_part = f" {kw}" if kw else ""
 
     if song_type == "greeting":
-        return f"good morning{theme_part} song for toddlers"
+        return f"good morning{theme_part} kindergarten  song"
     elif song_type == "goodbye":
-        return f"goodbye{theme_part} song for toddlers"
+        return f"goodbye{theme_part} kindergarten song"
     else:
-        return f"{song_title} song for toddlers"
+        return f"{song_title} kindergarten song"
 
 
 # ── Yoga vector search ────────────────────────────────────────
@@ -155,68 +155,59 @@ async def youtube_enricher(state: PlannerState) -> dict:
         logger.warning("Enricher: no circle_time in plan")
         return {}
 
-    # ── Song YouTube search (unchanged) ───────────────────────
+    # ── Song YouTube search (with deduplication) ──────────────
     greeting = circle_time.get("greeting_song")
     goodbye = circle_time.get("goodbye_song")
 
-    search_coros = []
-    task_labels = []
+    # Search greeting song first so we can exclude its video_id
+    # from the goodbye search (deduplication).
+    greeting_video_id: str | None = None
+    enriched = 0
 
     if greeting:
         q = _build_song_query(greeting.get("title", ""), "greeting", theme)
-        search_coros.append(search_youtube_video(q, video_category_id="10"))
-        task_labels.append(("greeting_song", q))
+        logger.info("Enricher: greeting query: %r", q)
+        g_result = await search_youtube_video(q, video_category_id="10")
+        if g_result:
+            greeting["youtube_url"] = g_result["embed_url"]
+            greeting["title"] = g_result["title"]
+            greeting["duration"] = g_result["duration"]
+            # Extract video_id from embed_url for dedup
+            greeting_video_id = g_result["embed_url"].rsplit("/", 1)[-1]
+            enriched += 1
+            logger.info("Enricher: greeting → '%s' (%s)",
+                        g_result["title"], g_result["duration"])
+        else:
+            logger.warning("Enricher: greeting song returned no results")
+
+    # Goodbye search — exclude the greeting video_id
+    exclude_ids = [greeting_video_id] if greeting_video_id else []
 
     if goodbye:
         q = _build_song_query(goodbye.get("title", ""), "goodbye", theme)
-        search_coros.append(search_youtube_video(q, video_category_id="10"))
-        task_labels.append(("goodbye_song", q))
+        logger.info("Enricher: goodbye query: %r (exclude=%s)", q, exclude_ids)
+        gb_result = await search_youtube_video(
+            q, video_category_id="10", exclude_video_ids=exclude_ids,
+        )
+        if gb_result:
+            goodbye["youtube_url"] = gb_result["embed_url"]
+            goodbye["title"] = gb_result["title"]
+            goodbye["duration"] = gb_result["duration"]
+            enriched += 1
+            logger.info("Enricher: goodbye → '%s' (%s)",
+                        gb_result["title"], gb_result["duration"])
+        else:
+            logger.warning("Enricher: goodbye song returned no results")
 
     # ── Yoga vector search ────────────────────────────────────
     yoga_keywords = [
         p.get("name", "") for p in circle_time.get("yoga_poses", [])
         if p.get("name")
     ]
-    yoga_coro = _find_yoga_poses(theme, yoga_keywords, limit=3)
-
-    # ── Fire song searches + yoga search concurrently ─────────
-    logger.info("Enricher: %d song searches + 1 yoga vector search", len(search_coros))
-    all_coros = search_coros + [yoga_coro]
-    results = await asyncio.gather(*all_coros, return_exceptions=True)
-
-    song_results = results[: len(search_coros)]
-    yoga_result = results[len(search_coros)]
-
-    # ── Apply song results ────────────────────────────────────
-    enriched = 0
-    for (label, query), result in zip(task_labels, song_results):
-        if isinstance(result, Exception):
-            logger.warning("Enricher: '%s' failed: %s", label, result)
-            continue
-        if result is None:
-            logger.warning("Enricher: '%s' returned no results", label)
-            continue
-
-        if label == "greeting_song" and greeting:
-            greeting["youtube_url"] = result["embed_url"]
-            greeting["title"] = result["title"]
-            greeting["duration"] = result["duration"]
-            enriched += 1
-            logger.info("Enricher: greeting → '%s' (%s)",
-                        result["title"], result["duration"])
-
-        elif label == "goodbye_song" and goodbye:
-            goodbye["youtube_url"] = result["embed_url"]
-            goodbye["title"] = result["title"]
-            goodbye["duration"] = result["duration"]
-            enriched += 1
-            logger.info("Enricher: goodbye → '%s' (%s)",
-                        result["title"], result["duration"])
+    yoga_result = await _find_yoga_poses(theme, yoga_keywords, limit=3)
 
     # ── Apply yoga results ────────────────────────────────────
-    if isinstance(yoga_result, Exception):
-        logger.warning("Enricher: yoga vector search failed: %s", yoga_result)
-    elif yoga_result:
+    if yoga_result:
         circle_time["yoga_poses"] = yoga_result
         enriched += len(yoga_result)
         for p in yoga_result:

@@ -365,18 +365,29 @@ def _clean_youtube_title(raw_title: str) -> str:
 async def search_youtube_video(
     query: str,
     video_category_id: str | None = None,
+    min_duration_seconds: int = 90,
+    max_duration_seconds: int = 600,
+    exclude_video_ids: list[str] | None = None,
 ) -> dict | None:
     """Search YouTube for a kid-safe video and return full metadata.
 
     Hits the YouTube Data API v3 search endpoint, then fetches video
-    details (duration) from the videos endpoint. Returns a dict with
-    embed_url, title, duration, and thumbnail — or None on failure.
+    details (duration) from the videos endpoint for ALL candidates in
+    a single batch call.  Filters out Shorts (< min_duration_seconds),
+    overly long videos (> max_duration_seconds), and any video IDs in
+    *exclude_video_ids* (for deduplication).
 
     Args:
         query: A search query string (e.g. 'goodbye song circle time
                toddlers' or 'tree pose yoga for kids').
         video_category_id: Optional YouTube category filter (e.g. '10'
                for Music). Omit for broader results.
+        min_duration_seconds: Reject videos shorter than this (default
+               90 s — filters out YouTube Shorts).
+        max_duration_seconds: Reject videos longer than this (default
+               600 s — 10 minutes).
+        exclude_video_ids: Video IDs to reject (e.g. the greeting song
+               ID when searching for the goodbye song).
 
     Returns:
         A dict ``{embed_url, title, duration, duration_seconds,
@@ -387,6 +398,8 @@ async def search_youtube_video(
         logger.warning("YouTube search skipped — YOUTUBE_API_KEY not set")
         return None
 
+    _exclude = set(exclude_video_ids or [])
+
     # Trusted kids / education channels — prefer these when available
     _TRUSTED_CHANNELS = {
         "super simple songs", "the kiboomers", "cosmic kids yoga",
@@ -396,11 +409,11 @@ async def search_youtube_video(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             # 1. Search for videos (fetch several to pick best)
             params = {
                 "part": "snippet",
-                "maxResults": 5,
+                "maxResults": 8,
                 "q": query,
                 "type": "video",
                 "safeSearch": "strict",
@@ -416,38 +429,64 @@ async def search_youtube_video(
                 logger.warning("YouTube: 0 results for '%s'", query)
                 return None
 
-            # 2. Score results — prefer trusted channels
-            best_item = items[0]
-            best_score = 0
-            for item in items:
-                channel = (item["snippet"].get("channelTitle") or "").lower()
-                score = 2 if any(tc in channel for tc in _TRUSTED_CHANNELS) else 1
-                if score > best_score:
-                    best_score = score
-                    best_item = item
-
-            snippet = best_item["snippet"]
-            video_id = best_item["id"]["videoId"]
-            channel_title = snippet.get("channelTitle", "")
-
-            # 3. Get real duration from videos endpoint
+            # 2. Batch-fetch durations for ALL candidates in one API call
+            video_ids = [item["id"]["videoId"] for item in items]
             detail_resp = await client.get(
                 YOUTUBE_VIDEOS_URL,
                 params={
                     "part": "contentDetails",
-                    "id": video_id,
+                    "id": ",".join(video_ids),
                     "key": api_key,
                 },
             )
             detail_resp.raise_for_status()
-            detail_items = detail_resp.json().get("items", [])
+            detail_map: dict[str, str] = {}
+            for d in detail_resp.json().get("items", []):
+                detail_map[d["id"]] = d["contentDetails"].get("duration", "")
 
-            iso_duration = ""
-            if detail_items:
-                iso_duration = detail_items[0]["contentDetails"].get("duration", "")
+            # 3. Score and filter candidates
+            best_item = None
+            best_score = -1
+            best_duration_info: tuple[str, int] = ("0:00", 0)
+
+            for item in items:
+                vid = item["id"]["videoId"]
+                if vid in _exclude:
+                    continue
+
+                iso_dur = detail_map.get(vid, "")
+                _, dur_sec = _parse_iso8601_duration(iso_dur)
+
+                # Reject Shorts and overly long videos
+                if dur_sec < min_duration_seconds or dur_sec > max_duration_seconds:
+                    continue
+
+                channel = (item["snippet"].get("channelTitle") or "").lower()
+                score = 0
+                # Prefer trusted channels
+                if any(tc in channel for tc in _TRUSTED_CHANNELS):
+                    score += 3
+                # Prefer sweet-spot duration (2-5 min)
+                if 120 <= dur_sec <= 300:
+                    score += 1
+                # Base score so every valid candidate has ≥ 1
+                score += 1
+
+                if score > best_score:
+                    best_score = score
+                    best_item = item
+                    best_duration_info = _parse_iso8601_duration(iso_dur)
+
+        if best_item is None:
+            logger.warning("YouTube: no valid results for '%s' after filtering", query)
+            return None
+
+        snippet = best_item["snippet"]
+        video_id = best_item["id"]["videoId"]
+        channel_title = snippet.get("channelTitle", "")
+        duration, duration_seconds = best_duration_info
 
         title = _clean_youtube_title(snippet.get("title", ""))
-        duration, duration_seconds = _parse_iso8601_duration(iso_duration)
         thumb = (snippet.get("thumbnails") or {}).get("high", {}).get("url", "")
         embed_url = f"https://www.youtube.com/embed/{video_id}"
 

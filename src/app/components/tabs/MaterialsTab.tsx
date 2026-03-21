@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Download, ExternalLink, Loader2, FileText } from "lucide-react";
+import { Download, Loader2, Package, CheckCircle, Sparkles } from "lucide-react";
 import { WeekPlan } from "../../utils/mockData";
-import { downloadMaterial, MaterialType } from "../../utils/api";
+import { BulkMaterialType, bulkExportMaterials } from "../../utils/api";
 import { CurriculumPDFDownload } from "../CurriculumPDFDownload";
 
 interface MaterialsTabProps {
@@ -11,44 +11,88 @@ interface MaterialsTabProps {
 
 export function MaterialsTab({ week, planId }: MaterialsTabProps) {
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
-  const [loadingMaterial, setLoadingMaterial] = useState<MaterialType | null>(null);
-  const [materialError, setMaterialError] = useState<string | null>(null);
-  const [generatedUrls, setGeneratedUrls] = useState<Partial<Record<MaterialType, string>>>({});
+  const [bulkExporting, setBulkExporting] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
-  // Printable materials that map to backend generators
-  const printableMaterials: { type: MaterialType; name: string; subtitle: string }[] = [
+  // Exportable material types for checkboxes
+  const exportableMaterials: { type: BulkMaterialType; name: string; subtitle: string }[] = [
+    ...[
+      {
+        type: "alphabet" as BulkMaterialType,
+        name: `Letter flashcard: ${week.circleTime.letter}`,
+        subtitle: week.circleTime.letterWord
+          ? `${week.circleTime.letter.toUpperCase()} is for ${week.circleTime.letterWord}`
+          : "Full-page printable",
+      },
+      {
+        type: "color" as BulkMaterialType,
+        name: `Color samples: ${week.circleTime.color}`,
+        subtitle: "Full-page printable",
+      },
+      {
+        type: "shape" as BulkMaterialType,
+        name: `Shape blocks: ${week.circleTime.shape}`,
+        subtitle: "Full-page printable",
+      },
+      {
+        type: "number" as BulkMaterialType,
+        name: `Counting objects (1-${week.circleTime.countingTo})`,
+        subtitle: week.circleTime.countingObject
+          ? `${week.circleTime.countingTo} ${week.circleTime.countingObject}`
+          : "Full-page printable",
+      },
+    ],
     {
-      type: "alphabet",
-      name: `Letter flashcard: ${week.circleTime.letter}`,
-      subtitle: week.circleTime.letterWord
-        ? `${week.circleTime.letter.toUpperCase()} is for ${week.circleTime.letterWord}`
-        : "Full-page printable",
+      type: "days_of_the_week" as BulkMaterialType,
+      name: "Days of the Week",
+      subtitle: "Universal poster",
     },
     {
-      type: "color",
-      name: `Color samples: ${week.circleTime.color}`,
-      subtitle: "Full-page printable",
+      type: "months_of_the_year" as BulkMaterialType,
+      name: "Months of the Year",
+      subtitle: "Universal poster",
     },
     {
-      type: "shape",
-      name: `Shape blocks: ${week.circleTime.shape}`,
-      subtitle: "Full-page printable",
-    },
-    {
-      type: "number",
-      name: `Counting objects (1-${week.circleTime.countingTo})`,
-      subtitle: week.circleTime.countingObject
-        ? `${week.circleTime.countingTo} ${week.circleTime.countingObject}`
-        : "Full-page printable",
+      type: "weather" as BulkMaterialType,
+      name: "Types of Weather",
+      subtitle: "Universal poster",
     },
   ];
 
-  // Non-printable circle time items (no backend generator)
-  const otherCircleTimeMaterials = [
-    "Weather chart or window",
-    "Music player or instrument",
-    "Circle time mat or carpet",
-  ];
+  // Static types that are always ready (no AI generation needed)
+  const STATIC_TYPES = new Set(['days_of_the_week', 'months_of_the_year', 'weather']);
+
+  const isMaterialReady = (type: BulkMaterialType): boolean => {
+    if (STATIC_TYPES.has(type)) return true;
+    const urlKey = `${type}_pdf_url`;
+    return !!(week.materialUrls && week.materialUrls[urlKey]);
+  };
+
+  // Checked exportable types (for bulk export)
+  const checkedExportTypes = exportableMaterials
+    .filter((m) => checkedItems.has(m.type))
+    .map((m) => m.type);
+
+  const handleBulkExport = async () => {
+    if (!planId || checkedExportTypes.length === 0) return;
+    setBulkExporting(true);
+    setBulkError(null);
+    try {
+      const { blob, filename } = await bulkExportMaterials(planId, checkedExportTypes);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setBulkError(err.message ?? 'Bulk export failed');
+    } finally {
+      setBulkExporting(false);
+    }
+  };
 
   const themeMaterials = Array.from(
     new Set(week.activities.flatMap((activity) => activity.materials))
@@ -62,29 +106,6 @@ export function MaterialsTab({ week, planId }: MaterialsTabProps) {
       newChecked.add(item);
     }
     setCheckedItems(newChecked);
-  };
-
-  const handleDownloadMaterial = async (type: MaterialType) => {
-    if (!planId) return;
-
-    // If already generated, just open it directly
-    const cached = generatedUrls[type];
-    if (cached) {
-      window.open(cached, "_blank");
-      return;
-    }
-
-    setLoadingMaterial(type);
-    setMaterialError(null);
-    try {
-      const url = await downloadMaterial(planId, type);
-      setGeneratedUrls((prev) => ({ ...prev, [type]: url }));
-      window.open(url, "_blank");
-    } catch (err: any) {
-      setMaterialError(err.message ?? "Download failed");
-    } finally {
-      setLoadingMaterial(null);
-    }
   };
 
   return (
@@ -102,105 +123,103 @@ export function MaterialsTab({ week, planId }: MaterialsTabProps) {
         </div>
       </div>
 
-      {/* Error Banner */}
-      {materialError && (
-        <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
-          {materialError}
+      {/* Bulk Export Section */}
+      <div className="bg-white rounded-2xl shadow-sm border border-border p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Package className="w-5 h-5" style={{ color: 'var(--theme-primary)' }} />
+            <h2 className="text-lg font-medium text-foreground">Export Posters</h2>
+          </div>
+          {checkedExportTypes.length > 0 && (
+            <span className="text-xs text-muted-foreground bg-muted/40 px-2 py-1 rounded-lg">
+              {checkedExportTypes.length} selected
+            </span>
+          )}
         </div>
-      )}
+        <p className="text-sm text-muted-foreground mb-4">
+          Select posters below and export them as a single merged PDF.
+        </p>
 
-      {/* Materials Grid */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Circle Time Materials */}
-        <div className="bg-white rounded-2xl shadow-sm border border-border p-6">
-          <h2 className="text-lg font-medium text-foreground mb-4">Circle Time Materials</h2>
-          <div className="space-y-2">
-            {/* Printable materials with download buttons */}
-            {printableMaterials.map((mat) => (
-              <div key={mat.type} className="border border-border/50 rounded-xl overflow-hidden">
-                <div className="flex items-center gap-3 p-3">
-                  <input
-                    type="checkbox"
-                    checked={checkedItems.has(mat.name)}
-                    onChange={() => toggleItem(mat.name)}
-                    className="w-5 h-5 rounded border-2 border-border text-primary focus:ring-2 focus:ring-primary/20"
-                  />
-                  <div className="flex-1 min-w-0">
+        {bulkError && (
+          <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
+            {bulkError}
+          </div>
+        )}
+
+        <div className="space-y-2 mb-4">
+          {exportableMaterials.map((mat) => (
+            <div key={mat.type} className="border border-border/50 rounded-xl overflow-hidden">
+              <div className="flex items-center gap-3 p-3">
+                <input
+                  type="checkbox"
+                  checked={checkedItems.has(mat.type)}
+                  onChange={() => toggleItem(mat.type)}
+                  className="w-5 h-5 rounded border-2 border-border text-primary focus:ring-2 focus:ring-primary/20"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
                     <span className="text-sm text-foreground">{mat.name}</span>
-                    <p className="text-xs text-muted-foreground mt-0.5">{mat.subtitle}</p>
-                  </div>
-                  <button
-                    onClick={() => handleDownloadMaterial(mat.type)}
-                    disabled={!planId || loadingMaterial !== null}
-                    className="flex-shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: 'var(--theme-primary)' }}
-                  >
-                    {loadingMaterial === mat.type ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Generating…
-                      </>
-                    ) : generatedUrls[mat.type] ? (
-                      <>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Open
-                      </>
+                    {isMaterialReady(mat.type) ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-50 text-green-700 border border-green-200">
+                        <CheckCircle className="w-3 h-3" />
+                        Ready
+                      </span>
                     ) : (
-                      <>
-                        <Download className="w-3.5 h-3.5" />
-                        Preview
-                      </>
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                        <Sparkles className="w-3 h-3" />
+                        Needs Generation
+                      </span>
                     )}
-                  </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{mat.subtitle}</p>
                 </div>
               </div>
-            ))}
-
-            {/* Non-printable items (just checkboxes) */}
-            {otherCircleTimeMaterials.map((material) => (
-              <div key={material} className="border border-border/50 rounded-xl overflow-hidden">
-                <label className="flex items-center gap-3 p-3 hover:bg-muted/10 cursor-pointer transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={checkedItems.has(material)}
-                    onChange={() => toggleItem(material)}
-                    className="w-5 h-5 rounded border-2 border-border text-primary focus:ring-2 focus:ring-primary/20"
-                  />
-                  <span className="text-sm text-foreground">{material}</span>
-                </label>
-              </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
 
-        {/* Theme Activity Materials */}
-        <div className="bg-white rounded-2xl shadow-sm border border-border p-6">
-          <h2 className="text-lg font-medium text-foreground mb-4">Theme Activity Materials</h2>
-          <div className="space-y-2">
-            {themeMaterials.map((material) => (
-              <div key={material} className="border border-border/50 rounded-xl overflow-hidden">
-                <label className="flex items-center gap-3 p-3 hover:bg-muted/10 cursor-pointer transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={checkedItems.has(material)}
-                    onChange={() => toggleItem(material)}
-                    className="w-5 h-5 rounded border-2 border-border text-primary focus:ring-2 focus:ring-primary/20"
-                  />
-                  <span className="text-sm text-foreground">{material}</span>
-                </label>
-              </div>
-            ))}
-          </div>
-        </div>
+        <button
+          onClick={handleBulkExport}
+          disabled={!planId || checkedExportTypes.length === 0 || bulkExporting}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-white rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ backgroundColor: 'var(--theme-primary)' }}
+        >
+          {bulkExporting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Exporting{checkedExportTypes.length > 1 ? ` ${checkedExportTypes.length} posters` : ''}…
+            </>
+          ) : (
+            <>
+              <Download className="w-4 h-4" />
+              {checkedExportTypes.length > 1
+                ? `Export ${checkedExportTypes.length} Posters as Single PDF`
+                : checkedExportTypes.length === 1
+                  ? 'Export Selected Poster'
+                  : 'Select posters to export'}
+            </>
+          )}
+        </button>
       </div>
 
-      {/* Summary */}
-      <div className="rounded-2xl p-4 theme-transition" style={{ backgroundColor: 'var(--theme-background)' }}>
-        <p className="text-sm text-center text-foreground">
-          <span className="font-medium">
-            {checkedItems.size} of {printableMaterials.length + otherCircleTimeMaterials.length + themeMaterials.length} items checked
-          </span>
-        </p>
+      {/* Theme Activity Materials */}
+      <div className="bg-white rounded-2xl shadow-sm border border-border p-6">
+        <h2 className="text-lg font-medium text-foreground mb-4">Theme Activity Materials</h2>
+        <div className="space-y-2">
+          {themeMaterials.map((material) => (
+            <div key={material} className="border border-border/50 rounded-xl overflow-hidden">
+              <label className="flex items-center gap-3 p-3 hover:bg-muted/10 cursor-pointer transition-colors">
+                <input
+                  type="checkbox"
+                  checked={checkedItems.has(material)}
+                  onChange={() => toggleItem(material)}
+                  className="w-5 h-5 rounded border-2 border-border text-primary focus:ring-2 focus:ring-primary/20"
+                />
+                <span className="text-sm text-foreground">{material}</span>
+              </label>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

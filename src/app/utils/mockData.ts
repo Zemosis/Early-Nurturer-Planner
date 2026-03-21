@@ -70,6 +70,7 @@ export interface WeekPlan {
   };
   coverImageUrl?: string;
   pdfUrl?: string;
+  materialUrls?: Record<string, string>;
   palette?: {
     primary: string;
     secondary: string;
