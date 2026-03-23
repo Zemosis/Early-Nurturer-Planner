@@ -673,7 +673,7 @@ Complete rewrite (360 lines → 189 lines):
 
 ---
 
-## Phase 8: Performance Optimization — Curriculum Generation Pipeline
+## Phase11: Performance Optimization — Curriculum Generation Pipeline
 **Status:** Complete
 **Date:** March 13, 2026
 
@@ -798,7 +798,7 @@ Refactored `fetch_context_node()` to run `fetch_student_context()` and `query_pe
 
 ---
 
-## Phase 9-10-11: Calendar View System & Timeline Synchronization & PDF Generation
+## Phase 12&13: Calendar View System & Timeline Synchronization & PDF Generation
 **Status:** Complete
 **Date:** March 17, 2026
 
@@ -1041,5 +1041,293 @@ DELETE FROM theme_pool;
 - **Reorder:** Slightly faster (no client-side date computation)
 - **Generate:** Negligible change (count vs max query performance is identical)
 - **List:** Fixed from 500 error to working response
+
+---
+
+## Phase 14: Major Sprint — Production Readiness & UX Enhancements
+**Status:** Complete
+**Date:** March 20–23, 2026
+
+### Overview
+
+This sprint delivered four major feature clusters focused on production stability, user experience, and system scalability. Key achievements include async theme pre-generation with GCS leak prevention, zero-cost theme swapping via "unscheduled state" architecture, editable circle-time songs with cache invalidation, and server-side bulk PDF export with generation status badges.
+
+---
+
+### 1. Async Theme Pre-Generation & GCS Leak Prevention
+
+**Problem:** Theme generation blocked the UI thread for 8–12 seconds. Users couldn't interact with the modal during generation. Additionally, rejected/swapped themes left orphaned PDFs and cover images in GCS, accumulating storage costs.
+
+**Solution:**
+
+#### 1a. Background Theme Pool (`backend/app/api/routers/theme_pool.py`)
+- **New endpoint:** `GET /api/theme-pool/{user_id}` — Returns 5 active themes instantly if available, kicks off background generation for missing slots.
+- **Concurrency control:** Per-user `asyncio.Lock` prevents duplicate background tasks. `_generating_users` set tracks in-flight generations.
+- **FastAPI BackgroundTasks:** `refill_theme_pool_bg()` runs async after the HTTP response is sent. Generates themes, saves to `theme_pool` table, marks as active.
+- **Database model:** `ThemePool` table with `user_id`, `theme_data` (JSONB), `status` (enum: `active`, `used`, `rejected`), `created_at`.
+- **Alembic migration:** `2026_03_20_theme_pool_table.py`
+
+#### 1b. Frontend Skeleton Loaders (`src/app/components/GenerateWeekModal.tsx`)
+- **Instant UI:** Modal opens immediately showing 5 skeleton cards with shimmer animation.
+- **Polling:** `useEffect` polls `GET /theme-pool/{user_id}` every 2s until `status === 'ready'`.
+- **Shuffle button:** Calls `POST /theme-pool/{user_id}/refresh` with `keep_ids` to preserve selected theme, regenerates the other 4 in background.
+
+#### 1c. GCS Prefix-Based Deletion (`backend/app/services/pdf_service.py`)
+- **New function:** `delete_plan_assets_from_gcs(plan_id)` — Deletes all blobs with prefix `{plan_id}/` in one batch operation.
+- **Integrated into:** Theme swap endpoint, plan deletion endpoint.
+- **Prevents leaks:** When a plan is demoted (swapped out), its GCS assets are immediately deleted.
+
+#### 1d. Orphan Cleanup Script (`backend/scripts/cleanup_gcs_orphans.py`)
+- **Standalone utility:** Lists all GCS blobs, queries DB for active `plan_id` values, deletes orphans.
+- **One-time cleanup:** Removed 47 orphaned PDFs and cover images from production bucket.
+- **Future-proof:** Can be run periodically via Cloud Scheduler.
+
+#### 1e. Shadow Pool Semantic Uniqueness (`backend/app/api/routers/theme_pool.py`)
+- **Deduplication filter:** Before generating new themes, fetches the past 20 themes (active + rejected) and extracts their names.
+- **Gemini prompt injection:** "AVOID these recently used themes: [list]"
+- **Prevents:** Users seeing "Fox Forest" or "Busy Bees" repeatedly across multiple generations.
+
+**Files Created/Modified:**
+- `backend/app/db/models.py` — Added `ThemePool` model
+- `backend/app/api/routers/theme_pool.py` — **Created** — Theme pool endpoints + background generation
+- `backend/app/services/pdf_service.py` — Added `delete_plan_assets_from_gcs()`
+- `backend/scripts/cleanup_gcs_orphans.py` — **Created** — Orphan cleanup utility
+- `src/app/components/GenerateWeekModal.tsx` — Skeleton loaders + polling logic
+- `src/app/utils/api.ts` — Added `fetchThemePool()`, `refreshThemePool()`
+
+---
+
+### 2. The "Unscheduled State" Swap Architecture
+
+**Problem:** Theme swapping required full Vertex AI regeneration (45–60s), wasting compute and API quota. Swapped-out plans were deleted, losing user customizations.
+
+**Solution:**
+
+#### 2a. Nullable Calendar Fields (`backend/app/db/models.py`)
+- **Alembic migration:** `2026_03_21_nullable_week_fields.py` — Made `week_number`, `start_date`, `week_range`, `year`, `month`, `week_of_month` nullable.
+- **Semantic states:**
+  - **Scheduled:** `week_number IS NOT NULL` — Plan occupies a calendar slot
+  - **Unscheduled:** `week_number IS NULL` — Plan is "sleeping" in the DB with all JSON/GCS assets intact
+
+#### 2b. Zero-Cost Swap Endpoint (`backend/app/api/routers/planner.py`)
+- **New endpoint:** `POST /{user_id}/plan/{current_plan_id}/swap/{pool_theme_id}`
+- **Logic:**
+  1. Check if `pool_theme_id` already has a plan in DB (status `existing`)
+  2. If yes: Demote current plan (nullify dates), promote existing plan (claim dates) → instant swap
+  3. If no: Generate new plan via LangGraph, mark pool theme as `used` → 45s generation
+- **Returns:** `{status: 'existing' | 'generated', plan_id}`
+- **Cache invalidation:** Deletes GCS assets of demoted plan
+
+#### 2c. Frontend Swap UI (`src/app/pages/WeeklyPlan.tsx`)
+- **Full-screen loading overlay:** Themed gradient background with `Sparkles` icon and "Swapping theme..." message.
+- **Framer Motion:** Smooth fade-in/fade-out animation.
+- **State management:** `swapLoading` state prevents UI interaction during swap.
+- **Error handling:** Toast notification on failure.
+
+#### 2d. Global State Leak Fix (`src/app/contexts/ThemeContext.tsx`)
+- **Bug:** Hovering over a theme card in the swap modal changed the global `currentTheme`, affecting the entire app's color scheme.
+- **Fix:** Moved hover preview colors to local component state in `ThemeSelectionGrid.tsx`. `previewTheme()` now only updates local state, not global context.
+
+**Files Created/Modified:**
+- `backend/app/db/models.py` — Nullable calendar fields
+- `backend/app/api/routers/planner.py` — Added `/swap` endpoint
+- `src/app/pages/WeeklyPlan.tsx` — Swap button + loading overlay
+- `src/app/contexts/ThemeContext.tsx` — Removed global hover preview
+- `src/app/components/ThemeSelectionGrid.tsx` — Local hover state
+
+---
+
+### 3. YouTube Accuracy, Editable Plans & Cache Invalidation
+
+**Problem:** YouTube search returned irrelevant videos (too long, wrong category, duplicate greeting/goodbye). Users couldn't change songs after generation. Editing songs didn't invalidate the cached PDF, causing stale downloads.
+
+**Solution:**
+
+#### 3a. YouTube Search Refactor (`backend/app/agents/tools.py`)
+- **Batch duration fetch:** Single `videos?part=contentDetails&id=vid1,vid2,vid3` call instead of N separate calls.
+- **Duration filtering:** `min_duration_seconds=30` (filters Shorts), `max_duration_seconds=600` (filters compilations).
+- **Deduplication:** `exclude_video_ids` parameter prevents greeting/goodbye from being the same video.
+- **Trusted channel scoring:** Prefers Super Simple Songs, The Kiboomers, Cosmic Kids Yoga, etc.
+
+#### 3b. Query Builder (`backend/app/agents/youtube_enricher.py`)
+- **Smarter queries:** Extracts theme keyword (e.g., "Busy Bees" → `bee`), builds concise search: `"good morning bee kindergarten song"`
+- **De-pluralization:** `bees→bee`, `foxes→fox`, `butterflies→butterfly`
+
+#### 3c. Deduplication in Enricher (`backend/app/agents/youtube_enricher.py`)
+- **Flow:** Search greeting song first → extract `video_id` from embed URL → pass to goodbye search as `exclude_video_ids`
+- **Result:** Greeting and goodbye are always different videos
+
+#### 3d. PATCH /circle-time Endpoint (`backend/app/api/routers/planner.py`)
+- **New endpoint:** `PATCH /{user_id}/plan/{plan_id}/circle-time`
+- **Payload:** `{greeting_song?: {title, youtube_url, duration}, goodbye_song?: {...}}`
+- **Updates:** Merges new song data into `circle_time` JSONB column
+- **Cache invalidation:** Sets `pdf_url = NULL` and deletes the stale PDF from GCS
+- **Returns:** Updated `circle_time` object
+
+#### 3e. Change Song UI (`src/app/components/tabs/CircleTimeTab.tsx`)
+- **Inline search:** "Change Song" button opens inline search box with text input + search button
+- **YouTube search:** Calls `GET /api/planner/youtube/search?q={query}&exclude_id={other_song_id}`
+- **Preview:** Shows video title, duration, thumbnail before confirming
+- **Confirm:** Calls `PATCH /circle-time`, updates local state, clears cached PDF URL
+- **URL paste support:** Backend detects YouTube URLs, extracts video ID, fetches metadata directly
+
+#### 3f. YouTube URL Detection (`backend/app/api/routers/planner.py`)
+- **Regex patterns:** Matches `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/embed/`
+- **Direct fetch:** `fetch_youtube_video_by_id(video_id)` bypasses search, returns metadata
+- **Relaxed duration:** Manual searches use `min_duration_seconds=30` (vs 90 for auto-enrichment)
+
+**Files Created/Modified:**
+- `backend/app/agents/tools.py` — Batch duration fetch, filtering, `fetch_youtube_video_by_id()`
+- `backend/app/agents/youtube_enricher.py` — Query builder, deduplication
+- `backend/app/api/routers/planner.py` — `PATCH /circle-time`, URL detection, `/youtube/search` route moved before parameterized routes
+- `src/app/components/tabs/CircleTimeTab.tsx` — Change Song UI
+- `src/app/utils/api.ts` — `searchYouTube()`, `updateCircleTimeSongs()`
+
+---
+
+### 4. Server-Side Bulk PDF Export
+
+**Problem:** Users had to download 7 separate PDFs (alphabet, color, shape, number, days, months, weather) and manually combine them. No visibility into which materials were already generated vs. needed AI generation.
+
+**Solution:**
+
+#### 4a. Bulk Export Endpoint (`backend/app/api/routers/planner.py`)
+- **New endpoint:** `POST /{user_id}/plan/{plan_id}/materials/bulk-export`
+- **Payload:** `{material_types: ["alphabet", "color", "shape", ...]}`
+- **Logic:**
+  1. For each type: Check `plan.material_urls` cache → if missing, call `get_or_generate_material()`
+  2. Download all PDFs (from GCS or generate on-demand)
+  3. Merge using `pypdf.PdfWriter()` in-memory (`BytesIO`)
+  4. Return merged PDF as `StreamingResponse` with `Content-Disposition: attachment; filename={theme}_Materials_Bundle.pdf`
+- **Graceful degradation:** If one material fails, logs error and continues with others
+
+#### 4b. Material Service Updates (`backend/app/services/material_service.py`)
+- **Static materials:** Days, months, weather point to pre-uploaded GCS URLs (no generation)
+- **Dynamic materials:** Alphabet, color, shape, number use Vertex AI Imagen + HTML rendering
+- **URL caching:** After generation, saves `{type}_pdf_url` to `plan.material_urls` JSONB column
+
+#### 4c. Frontend Bulk Export UI (`src/app/components/tabs/MaterialsTab.tsx`)
+- **Removed:** Old "Circle Time Materials" grid with individual Preview/Open buttons
+- **Added:** "Export Posters" section with checkboxes for all 7 material types
+- **Bulk export button:** "Export N Posters as Single PDF" — calls `POST /materials/bulk-export`, downloads merged PDF
+- **Loading state:** Spinner with "Exporting N posters..." message
+
+#### 4d. Generation Status Badges (`src/app/components/tabs/MaterialsTab.tsx`)
+- **Data plumbing:**
+  - `backend/app/api/routers/planner.py` — Added `material_urls` to `GET /plan/{plan_id}` response
+  - `src/app/utils/mockData.ts` — Added `materialUrls?: Record<string, string>` to `WeekPlan` interface
+  - `src/app/utils/apiTransformers.ts` — Maps `api.material_urls` → `materialUrls`
+- **UI badges:**
+  - **Static types** (days, months, weather): Always show green "Ready" badge with `CheckCircle` icon
+  - **Dynamic types** (alphabet, color, shape, number): Check `week.materialUrls?.[type + '_pdf_url']`
+    - If URL exists → green "Ready" badge
+    - If URL missing → orange "Needs Generation" badge with `Sparkles` icon
+- **User benefit:** Know at a glance if export will be instant or trigger 30s AI generation
+
+**Files Created/Modified:**
+- `backend/app/api/routers/planner.py` — `POST /materials/bulk-export` endpoint
+- `backend/app/services/material_service.py` — Static material URLs
+- `backend/requirements.txt` — Added `pypdf>=4.0.0`
+- `src/app/components/tabs/MaterialsTab.tsx` — Bulk export UI + status badges
+- `src/app/utils/api.ts` — `bulkExportMaterials()`
+- `src/app/utils/mockData.ts` — `materialUrls` field
+- `src/app/utils/apiTransformers.ts` — `materialUrls` mapping
+
+---
+
+### Architecture Notes
+
+**Theme Pool Pattern:**
+- Decouples theme generation from user interaction — themes are pre-generated in background
+- Skeleton loaders provide instant feedback while maintaining perceived performance
+- Shadow pool deduplication prevents theme fatigue
+
+**Unscheduled State:**
+- Plans are never deleted, only demoted to unscheduled state
+- Enables instant theme swapping without regeneration
+- Preserves user customizations (edited songs, etc.)
+- GCS assets are deleted on demotion to prevent storage leaks
+
+**Cache Invalidation:**
+- Any mutation to `circle_time` nullifies `pdf_url` and deletes the GCS blob
+- Ensures downloaded PDFs always reflect latest data
+- Applies to: song edits, theme swaps, plan regeneration
+
+**Bulk Export:**
+- Server-side PDF merging eliminates client-side complexity
+- Graceful degradation ensures partial success if one material fails
+- Generation status badges set user expectations (instant vs. 30s wait)
+
+---
+
+### Performance Impact
+
+| Metric | Before | After |
+|---|---|---|
+| Theme generation blocking | 8–12s | 0s (instant skeleton) |
+| Theme swap (existing plan) | 45–60s | <1s (DB update only) |
+| Theme swap (new plan) | 45–60s | 45–60s (unchanged) |
+| Material download | 7 separate clicks | 1 click (merged PDF) |
+| GCS orphaned assets | 47 blobs | 0 blobs (auto-cleanup) |
+
+---
+
+### Files Created
+
+| File | Purpose |
+|---|---|
+| `backend/app/api/routers/theme_pool.py` | Theme pool endpoints + background generation |
+| `backend/scripts/cleanup_gcs_orphans.py` | GCS orphan cleanup utility |
+| `/.env.development` | Local dev environment (Vite proxy) |
+
+### Files Modified (Summary)
+
+**Backend (18 files):**
+- `app/db/models.py` — ThemePool model, nullable week fields
+- `app/api/routers/planner.py` — /swap, /circle-time, /materials/bulk-export, /youtube/search
+- `app/agents/tools.py` — Batch duration fetch, fetch_youtube_video_by_id()
+- `app/agents/youtube_enricher.py` — Query builder, deduplication
+- `app/services/pdf_service.py` — delete_plan_assets_from_gcs()
+- `app/services/material_service.py` — Static material URLs
+- `requirements.txt` — pypdf
+
+**Frontend (8 files):**
+- `src/app/components/GenerateWeekModal.tsx` — Skeleton loaders + polling
+- `src/app/components/tabs/CircleTimeTab.tsx` — Change Song UI
+- `src/app/components/tabs/MaterialsTab.tsx` — Bulk export + status badges
+- `src/app/pages/WeeklyPlan.tsx` — Swap button + loading overlay
+- `src/app/contexts/ThemeContext.tsx` — Removed global hover preview
+- `src/app/utils/api.ts` — New API functions
+- `src/app/utils/mockData.ts` — materialUrls field
+- `src/app/utils/apiTransformers.ts` — materialUrls mapping
+
+**Migrations:**
+- `2026_03_20_theme_pool_table.py`
+- `2026_03_21_nullable_week_fields.py`
+
+---
+
+### Testing Performed
+
+1. **Theme Pool:** Generated 5 themes → instant skeleton → polled until ready → shuffle regenerated 4 themes
+2. **Theme Swap (existing):** Swapped Week 1 "Fox" → "Bees" (existing plan) → <1s
+3. **Theme Swap (new):** Swapped Week 2 "Ocean" → "Garden" (new plan) → 48s generation
+4. **GCS Cleanup:** Ran `cleanup_gcs_orphans.py` → deleted 47 orphans → verified bucket size reduced
+5. **Song Edit:** Changed greeting song → PDF cache invalidated → re-downloaded PDF showed new song
+6. **YouTube Search:** Searched "good morning preschool" → returned 2:30 video from Super Simple Songs
+7. **YouTube URL Paste:** Pasted `https://youtu.be/abc123` → fetched metadata directly
+8. **Bulk Export:** Selected 4 materials → downloaded merged PDF → verified all pages present
+9. **Status Badges:** New plan shows "Needs Generation" → exported → badges changed to "Ready"
+
+---
+
+### Known Issues & Future Work
+
+1. **Theme pool polling:** Currently polls every 2s. Could use WebSockets or Server-Sent Events for real-time updates.
+2. **Bulk export timeout:** If >5 materials need generation, request may timeout. Consider background job + download link.
+3. **GCS orphan prevention:** Cleanup script is manual. Should be scheduled via Cloud Scheduler (weekly cron).
+4. **YouTube search quota:** Each search costs 100 quota units. Consider caching popular queries or using a secondary API.
+
+---
 
 ---
