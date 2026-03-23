@@ -503,3 +503,53 @@ async def search_youtube_video(
     except Exception as e:
         logger.warning("YouTube search failed for '%s': %s", query, e)
         return None
+
+
+async def fetch_youtube_video_by_id(video_id: str) -> dict | None:
+    """Fetch metadata for a single YouTube video by its ID.
+
+    Used when the user pastes a YouTube URL instead of a search query.
+    Returns the same dict shape as search_youtube_video.
+    """
+    api_key = settings.YOUTUBE_API_KEY
+    if not api_key:
+        logger.warning("YouTube fetch skipped — YOUTUBE_API_KEY not set")
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                YOUTUBE_VIDEOS_URL,
+                params={
+                    "part": "snippet,contentDetails",
+                    "id": video_id,
+                    "key": api_key,
+                },
+            )
+            resp.raise_for_status()
+            items = resp.json().get("items", [])
+            if not items:
+                logger.warning("YouTube: video ID '%s' not found", video_id)
+                return None
+
+            item = items[0]
+            snippet = item["snippet"]
+            duration, duration_seconds = _parse_iso8601_duration(
+                item["contentDetails"].get("duration", "")
+            )
+            title = _clean_youtube_title(snippet.get("title", ""))
+            thumb = (snippet.get("thumbnails") or {}).get("high", {}).get("url", "")
+            embed_url = f"https://www.youtube.com/embed/{video_id}"
+
+            logger.info("YouTube fetch: ID=%s → '%s' (%s)", video_id, title, duration)
+            return {
+                "embed_url": embed_url,
+                "title": title,
+                "duration": duration,
+                "duration_seconds": duration_seconds,
+                "thumbnail": thumb,
+            }
+
+    except Exception as e:
+        logger.warning("YouTube fetch failed for ID '%s': %s", video_id, e)
+        return None

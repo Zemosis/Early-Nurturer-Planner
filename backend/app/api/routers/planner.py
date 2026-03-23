@@ -10,6 +10,7 @@ safety-audited weekly curriculum plan.
 import asyncio
 import io
 import logging
+import re as _re
 import uuid
 from datetime import date, timedelta
 
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, update as sa_update
 
 from app.agents.graph import build_planner_graph
-from app.agents.tools import search_youtube_video
+from app.agents.tools import search_youtube_video, fetch_youtube_video_by_id
 from app.db.database import async_session_factory
 from app.db.models import WeeklyPlan, ThemePool
 from app.services.image_service import get_or_generate_cover_image
@@ -77,20 +78,50 @@ def _compute_week_info(today: date | None = None) -> dict:
 # ── Endpoints ─────────────────────────────────────────────────
 
 
+_YT_URL_PATTERNS = [
+    _re.compile(r'(?:youtube\.com/watch\?.*v=|youtu\.be/|youtube\.com/embed/)([\w-]{11})'),
+]
+
+
+def _extract_video_id(text: str) -> str | None:
+    """Extract a YouTube video ID from a URL, or return None if not a URL."""
+    for pat in _YT_URL_PATTERNS:
+        m = pat.search(text)
+        if m:
+            return m.group(1)
+    return None
+
+
 @router.get("/youtube/search")
 async def youtube_search(q: str, exclude_id: str | None = None):
     """Search YouTube for a kid-safe video. Used by the Change Song UI.
 
+    Supports both text queries and direct YouTube URL paste.
     Defined BEFORE parameterized /{user_id}/… routes to avoid
     any routing ambiguity in FastAPI/Starlette.
     """
     if not q or len(q.strip()) < 2:
         raise HTTPException(status_code=400, detail="Query too short")
 
+    # If the query looks like a YouTube URL, fetch the video directly
+    video_id = _extract_video_id(q)
+    if video_id:
+        logger.info("YouTube search: detected URL, fetching video ID %s", video_id)
+        try:
+            result = await fetch_youtube_video_by_id(video_id)
+        except Exception as e:
+            logger.error("YouTube fetch failed for ID %s: %s", video_id, e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"YouTube fetch error: {e}")
+        if not result:
+            raise HTTPException(status_code=404, detail="Video not found or unavailable")
+        return result
+
+    # Otherwise do a keyword search (relaxed duration for manual picks)
     exclude = [exclude_id] if exclude_id else None
     try:
         result = await search_youtube_video(
             q, video_category_id="10", exclude_video_ids=exclude,
+            min_duration_seconds=30,
         )
     except Exception as e:
         logger.error("YouTube search endpoint failed for q=%r: %s", q, e, exc_info=True)
