@@ -135,7 +135,8 @@ async def youtube_search(q: str, exclude_id: str | None = None):
 
 @router.post("/generate")
 async def generate_plan(request: GeneratePlanRequest, background_tasks: BackgroundTasks):
-    """Trigger the full Architect → Auditor → Personalizer pipeline.
+    """Trigger the full Architect → Auditor → Personalizer pipeline,
+    or instantly resurrect a sleeping plan if the pool theme has a plan_id.
 
     Auto-computes calendar week info from today's date.
     Marks the selected theme as used in the pool (if theme_pool_id given)
@@ -149,15 +150,26 @@ async def generate_plan(request: GeneratePlanRequest, background_tasks: Backgrou
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid user_id")
 
-    # Compute global week number (max existing + 1) and mark pool theme used
+    # Count only SCHEDULED plans (week_number IS NOT NULL) so that
+    # resurrecting a sleeping row doesn't cause week_number collisions.
     async with async_session_factory() as session:
         result = await session.execute(
             select(func.count(WeeklyPlan.id))
-            .where(WeeklyPlan.user_id == user_uid)
+            .where(
+                WeeklyPlan.user_id == user_uid,
+                WeeklyPlan.week_number.isnot(None),
+            )
         )
         global_week_number = result.scalar() + 1
 
-        # Mark theme as used in pool (if pool ID provided)
+        # Offset week info so plan N starts N-1 weeks from today
+        week_info = _compute_week_info(
+            today=date.today() + timedelta(weeks=global_week_number - 1)
+        )
+
+        existing_plan_to_resurrect = None
+
+        # Check the theme pool for a sleeping plan to resurrect
         if request.theme_pool_id:
             try:
                 pool_uid = uuid.UUID(request.theme_pool_id)
@@ -169,20 +181,64 @@ async def generate_plan(request: GeneratePlanRequest, background_tasks: Backgrou
                 )
                 pool_theme = pool_result.scalar_one_or_none()
                 if pool_theme:
-                    pool_theme.is_used = True
+                    # Did this pool theme come from a swapped-out plan?
+                    if pool_theme.plan_id:
+                        plan_result = await session.execute(
+                            select(WeeklyPlan).where(WeeklyPlan.id == pool_theme.plan_id)
+                        )
+                        existing_plan_to_resurrect = plan_result.scalar_one_or_none()
+
+                    if existing_plan_to_resurrect:
+                        # Resurrect: assign the new calendar slot
+                        existing_plan_to_resurrect.week_number = global_week_number
+                        existing_plan_to_resurrect.year = week_info["year"]
+                        existing_plan_to_resurrect.month = week_info["month"]
+                        existing_plan_to_resurrect.week_of_month = week_info["week_of_month"]
+                        existing_plan_to_resurrect.week_range = week_info["week_range"]
+                        # Delete the pool row so it leaves the sidebar
+                        await session.delete(pool_theme)
+                    else:
+                        # Normal AI theme — mark as used
+                        pool_theme.is_used = True
+
                     await session.commit()
             except Exception as e:
-                logger.warning("Failed to mark pool theme as used: %s", e)
+                logger.warning("Failed to process pool theme: %s", e)
+
+        # Extract full plan data inside the session (before it closes)
+        plan_data = None
+        plan_id_str = None
+        if existing_plan_to_resurrect:
+            plan_data = {
+                "theme": existing_plan_to_resurrect.theme,
+                "theme_emoji": existing_plan_to_resurrect.theme_emoji,
+                "palette": existing_plan_to_resurrect.palette,
+                "domains": existing_plan_to_resurrect.domains,
+                "objectives": existing_plan_to_resurrect.objectives,
+                "circle_time": existing_plan_to_resurrect.circle_time,
+                "daily_plans": _rebuild_daily_plans(existing_plan_to_resurrect.activities or []),
+                "newsletter": existing_plan_to_resurrect.newsletter,
+                "week_number": global_week_number,
+                "week_range": week_info["week_range"],
+                "cover_image_url": existing_plan_to_resurrect.cover_image_url,
+                "pdf_url": existing_plan_to_resurrect.pdf_url,
+                "material_urls": existing_plan_to_resurrect.material_urls,
+            }
+            plan_id_str = str(existing_plan_to_resurrect.id)
 
     # Kick off background theme pool refill immediately (don't wait for plan gen)
     background_tasks.add_task(refill_theme_pool_bg, user_uid)
 
-    # Offset week info so plan N starts N-1 weeks from today,
-    # giving each curriculum week a distinct real-world date range
-    week_info = _compute_week_info(
-        today=date.today() + timedelta(weeks=global_week_number - 1)
-    )
+    # Fast path: resurrected plan — return instantly, skip LangGraph
+    if plan_data:
+        logger.info("Generate complete (resurrected instantly) — plan_id=%s", plan_id_str)
+        return {
+            "status": "success",
+            "plan": plan_data,
+            "plan_id": plan_id_str,
+        }
 
+    # ── AI generation fallback ────────────────────────────────
     try:
         graph_app = build_planner_graph()
 
@@ -312,10 +368,32 @@ async def swap_theme(
         greeting_song = ct.get("greeting_song") or {}
         domains = current_plan.domains or []
 
+        # Clean theme name: strip AI-generated subtitle (e.g. "Busy Bees: A Sweet Exploration" → "Busy Bees")
+        raw_name = current_plan.theme or ""
+        clean_name = raw_name.split(":")[0].strip() if ":" in raw_name else raw_name
+        clean_id = _re.sub(r"[^a-z0-9-]", "", clean_name.lower().replace(" ", "-"))
+
+        # Recover emoji from the original pool theme if the plan didn't store one
+        plan_emoji = current_plan.theme_emoji
+        if not plan_emoji:
+            clean_lower = clean_name.lower()
+            used_result = await session.execute(
+                select(ThemePool.theme_data).where(
+                    ThemePool.user_id == user_uid,
+                    ThemePool.is_used == True,
+                    ThemePool.plan_id.is_(None),
+                )
+            )
+            for (td,) in used_result:
+                if (td or {}).get("name", "").lower() == clean_lower:
+                    plan_emoji = td.get("emoji", "")
+                    break
+        plan_emoji = plan_emoji or "📁"
+
         demoted_theme_data = {
-            "id": (current_plan.theme or "").lower().replace(" ", "-"),
-            "name": current_plan.theme or "",
-            "emoji": current_plan.theme_emoji or "📁",
+            "id": clean_id,
+            "name": clean_name,
+            "emoji": plan_emoji,
             "letter": ct.get("letter", ""),
             "shape": ct.get("shape", ""),
             "mood": ", ".join(domains) if domains else "",
