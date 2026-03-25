@@ -1321,12 +1321,96 @@ This sprint delivered four major feature clusters focused on production stabilit
 
 ---
 
+---
+
+## Phase 15: Cloud Tasks Migration — Scalable Background Generation
+**Status:** Complete
+**Date:** March 25, 2026
+
+### Overview
+
+Migrated theme pool background generation from in-process `BackgroundTasks` to **Google Cloud Tasks**. This move enables reliable, asynchronous execution that scales independently of the main API process, prevents request timeouts, and eliminates the "polling bomb" risk where frequent GET requests could trigger excessive generation tasks.
+
+---
+
+### 1. Cloud Tasks Architecture
+
+**Problem:** Using `asyncio.create_task` or FastAPI `BackgroundTasks` for 60-second theme generation was risky. If a Cloud Run instance scaled down or crashed, the task was lost. Also, the GET endpoint previously triggered generation, leading to a "polling bomb" if the frontend polled frequently.
+
+**Solution:**
+- **Task Service (`backend/app/services/task_service.py`):** Centralized helper `enqueue_theme_refill(user_id)` that constructs a fully qualified Cloud Tasks path and enqueues an HTTP POST task.
+- **Worker Endpoint (`backend/app/api/routers/worker.py`):** Dedicated internal endpoint `POST /internal/worker/generate-themes` that performs the actual generation logic.
+- **Local Fallback:** If `CLOUD_RUN_URL` is not set (local dev), the service automatically falls back to in-process async execution, maintaining a "zero-config" local experience.
+
+### 2. Polling Bomb Prevention
+
+**Changes to `GET /api/theme-pool/{user_id}`:**
+- **Strictly Read-Only:** Removed all task enqueuing logic from the GET endpoint.
+- **Count-Based Inference:** The `generating` flag is now derived purely from the current database count (`len(active_themes) < POOL_SIZE`).
+- **Trigger-on-Write:** Task enqueuing now only happens during state-mutating operations: `generate_plan`, `swap_theme`, and `refresh_pool`.
+
+### 3. Security & SDK Fixes
+
+- **Internal API Key:** Secured the worker endpoint with a shared secret `WORKER_API_KEY` passed in the `X-Worker-Key` header.
+- **Fully Qualified Queue Path:** Updated the Cloud Tasks SDK usage to use the required `projects/{project}/locations/{location}/queues/{queue}` format using existing GCP config fields.
+- **Retry Logic:** Cloud Tasks automatically handles retries (up to 3 attempts with exponential backoff) if the worker returns a non-200 status.
+
+**Files Created/Modified:**
+- `backend/app/services/task_service.py` — **Created** — Cloud Tasks enqueue logic + local fallback
+- `backend/app/api/routers/worker.py` — **Created** — Secure internal generation worker
+- `backend/config.py` — Added `WORKER_API_KEY`, `CLOUD_TASKS_QUEUE`, `CLOUD_RUN_URL`
+- `backend/requirements.txt` — Added `google-cloud-tasks>=2.16.0`
+- `backend/app/api/routers/theme_pool.py` — Made GET read-only, removed in-memory locks
+- `backend/app/api/routers/planner.py` — Replaced `BackgroundTasks` with `enqueue_theme_refill()`
+- `backend/main.py` — Registered worker router
+- `scripts/deploy-backend.sh` — Added extraction of new secrets from `.env`
+
+---
+
+### Architecture Notes (Updated)
+
+**Task Decoupling:**
+- main-process handles HTTP requests and state persistence.
+- worker-process (triggered by Cloud Tasks) handles heavy LLM generation.
+- Decoupling prevents slow LLM calls from hogging main-process resources.
+
+---
+
+### Performance Impact
+
+| Metric | Before (In-Process) | After (Cloud Tasks) |
+|---|---|---|
+| Main API Latency | Blocked by background task overhead | Minimal (fire-and-forget enqueue) |
+| Task Reliability | Volatile (lost on scale-down) | Guaranteed (Cloud Tasks retry queue) |
+| Polling Safety | High risk ("polling bomb") | Safe (GET is read-only) |
+| Scaling | Vertical (within instance) | Horizontal (across Cloud Run instances) |
+
+---
+
+### Files Created
+
+| File | Purpose |
+|---|---|
+| `backend/app/services/task_service.py` | Cloud Tasks integration & local fallback |
+| `backend/app/api/routers/worker.py` | Internal worker for heavy background tasks |
+
+---
+
+### Testing Performed
+
+1. **Local Mode:** Verified theme generation still works locally without Cloud Tasks configured (verified via logs).
+2. **Read-Only GET:** Confirmed polling the theme pool endpoint does NOT trigger duplicate tasks.
+3. **Trigger-on-Swap:** Confirmed swapping a theme correctly enqueues a refill task.
+4. **Auth Security:** Verified `POST /internal/worker/generate-themes` returns 401/403 without the correct `X-Worker-Key`.
+5. **Deployment:** Verified `deploy-backend.sh` correctly passes new environment variables.
+
+---
+
 ### Known Issues & Future Work
 
-1. **Theme pool polling:** Currently polls every 2s. Could use WebSockets or Server-Sent Events for real-time updates.
-2. **Bulk export timeout:** If >5 materials need generation, request may timeout. Consider background job + download link.
-3. **GCS orphan prevention:** Cleanup script is manual. Should be scheduled via Cloud Scheduler (weekly cron).
-4. **YouTube search quota:** Each search costs 100 quota units. Consider caching popular queries or using a secondary API.
+1. **Theme pool polling:** Currently polls every 2s. Now that the "polling bomb" is fixed, SSE/WebSockets is purely a UX optimization for lower latency.
+2. **Bulk export timeout:** Still an issue. Should eventually use the same Cloud Tasks architecture to generate PDFs in the background.
+3. **GCS orphan prevention:** Cleanup script is still manual.
 
 ---
 

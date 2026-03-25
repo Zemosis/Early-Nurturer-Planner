@@ -15,6 +15,7 @@ The **Early Nurturer Planner Backend** is a FastAPI application powered by a Lan
 | **Orchestration** | LangGraph | Multi-agent pipeline with conditional routing |
 | **Database** | PostgreSQL + asyncpg | Async relational storage |
 | **Vectors** | pgvector | Developmental embeddings & RAG |
+| **Background Tasks** | Google Cloud Tasks | Scalable, reliable background job enqueuing |
 | **ORM** | SQLAlchemy 2.0 (async) | Database models & queries |
 | **Migrations** | Alembic | Schema versioning |
 | **Config** | pydantic-settings | Type-safe .env loading |
@@ -43,7 +44,8 @@ backend/
 │   │   └── routers/
 │   │       ├── __init__.py
 │   │       ├── themes.py            # POST /api/themes/generate (legacy)
-│   │       ├── theme_pool.py        # GET /api/theme-pool/{user_id}, POST /refresh
+│   │       ├── theme_pool.py        # GET /api/theme-pool/{user_id} (read-only), POST /refresh
+│   │       ├── worker.py            # POST /internal/worker/generate-themes (Cloud Tasks worker)
 │   │       └── planner.py           # Plan generation, CRUD, PDF, reorder, delete
 │   │
 │   ├── agents/                      # ── LangGraph AI Pipeline ──
@@ -59,7 +61,8 @@ backend/
 │   │
 │   ├── services/                    # ── Business Logic Services ──
 │   │   ├── pdf_service.py           # WeasyPrint PDF generation + GCS upload/cache
-│   │   └── image_service.py         # Vertex AI cover image generation + GCS
+│   │   ├── image_service.py         # Vertex AI cover image generation + GCS
+│   │   └── task_service.py          # Google Cloud Tasks enqueuing + local fallback
 │   │
 │   └── db/                          # ── Database Layer ──
 │       ├── __init__.py
@@ -92,6 +95,9 @@ Settings are loaded from `backend/.env` via `pydantic-settings`. The `Settings` 
 | `GOOGLE_APPLICATION_CREDENTIALS` | ❌ | `None` | SA key path (optional on Cloud Run) |
 | `VERTEX_AI_LOCATION` | ❌ | `us-central1` | Vertex AI region |
 | `YOUTUBE_API_KEY` | ❌ | `""` | YouTube Data API v3 key |
+| `WORKER_API_KEY` | ✅ | — | Shared secret for internal worker authentication |
+| `CLOUD_TASKS_QUEUE` | ❌ | `theme-generation` | Google Cloud Tasks queue name |
+| `CLOUD_RUN_URL` | ❌ | `""` | Base URL of the deployed Cloud Run service |
 
 ### Validators
 - `GOOGLE_APPLICATION_CREDENTIALS` — if provided, verifies the file exists on disk. `None` is allowed (Cloud Run uses built-in SA identity).
@@ -104,9 +110,27 @@ Settings are loaded from `backend/.env` via `pydantic-settings`. The `Settings` 
 ### `GET /api/theme-pool/{user_id}`
 **Router:** `app/api/routers/theme_pool.py`
 
-Returns the user's active theme pool (up to 5). Auto-generates replacements if fewer than 5 active themes exist. First-time users get 5 freshly generated themes.
+Returns the user's active theme pool (up to 5). This endpoint is **strictly read-only** and does not trigger background generation. It returns a `generating` flag (boolean) based on whether the current count is less than 5.
 
-**Response:** Array of `{ id, theme_data }` objects.
+**Response:**
+```json
+{
+  "themes": [ { "id": "...", "theme_data": {...} }, ... ],
+  "generating": true,
+  "pool_size": 5
+}
+```
+
+---
+
+### `POST /internal/worker/generate-themes`
+**Router:** `app/api/routers/worker.py`
+
+Internal worker endpoint triggered by Google Cloud Tasks. Generates missing themes for a specific user to refill their pool.
+
+**Security:** Requires `X-Worker-Key` header matching `WORKER_API_KEY`.
+
+**Request:** `{ "user_id": "uuid" }`
 
 ---
 

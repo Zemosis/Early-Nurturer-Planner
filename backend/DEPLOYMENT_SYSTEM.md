@@ -104,6 +104,9 @@ One-command deployment script. Reads `YOUTUBE_API_KEY` from `backend/.env`, buil
 | `GCP_PROJECT_ID` | `early-nurturer-planner` | |
 | `VERTEX_AI_LOCATION` | `us-central1` | |
 | `YOUTUBE_API_KEY` | `AIzaSy...` | |
+| `WORKER_API_KEY` | `shared-secret` | Shared secret for internal worker auth |
+| `CLOUD_TASKS_QUEUE` | `theme-generation` | Queue name |
+| `CLOUD_RUN_URL` | `https://...run.app` | Service URL for task callbacks |
 | `GOOGLE_APPLICATION_CREDENTIALS` | *(not set)* | Cloud Run uses built-in SA identity |
 
 ### Frontend (`.env.production` at project root)
@@ -168,12 +171,22 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 ## Deploy Checklist
 
 ### First-Time Setup
-1. ✅ Enable Cloud Run, Cloud Build, Cloud SQL APIs
+1. ✅ Enable Cloud Run, Cloud Build, Cloud SQL, and Cloud Tasks APIs
 2. ✅ Create Cloud SQL instance (`nurture-postgres`)
-3. ✅ Grant Cloud Run SA → Cloud SQL Client role
-4. ✅ Grant Cloud Run SA → Vertex AI User role
-5. ✅ Run `alembic upgrade head` against the database
-6. ✅ Run `python scripts/seed_db.py` for mock data
+3. ✅ Create Cloud Tasks queue:
+   ```bash
+   gcloud tasks queues create theme-generation \
+     --location=us-central1 \
+     --max-dispatches-per-second=2 \
+     --max-concurrent-dispatches=1 \
+     --max-attempts=3 \
+     --min-backoff=10s
+   ```
+4. ✅ Grant Cloud Run SA → Cloud SQL Client role
+5. ✅ Grant Cloud Run SA → Vertex AI User role
+6. ✅ Grant Cloud Run SA → Cloud Tasks Enqueuer role
+7. ✅ Run `alembic upgrade head` against the database
+8. ✅ Run `python scripts/seed_db.py` for mock data
 
 ### Every Deploy
 1. Make code changes
