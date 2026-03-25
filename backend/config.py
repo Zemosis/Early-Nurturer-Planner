@@ -55,6 +55,20 @@ class Settings(BaseSettings):
         description="GCP region for Vertex AI API calls",
     )
 
+    # ── Cloud Tasks ───────────────────────────────────────────
+    WORKER_API_KEY: str = Field(
+        default="",
+        description="Shared secret for authenticating internal worker endpoints",
+    )
+    CLOUD_TASKS_QUEUE: str = Field(
+        default="theme-generation",
+        description="Cloud Tasks queue name (not the full path)",
+    )
+    CLOUD_RUN_URL: str = Field(
+        default="",
+        description="Cloud Run service URL for task callbacks (empty = local mode, runs in-process)",
+    )
+
     # ── YouTube Data API ──────────────────────────────────────
     YOUTUBE_API_KEY: str = Field(
         default="",

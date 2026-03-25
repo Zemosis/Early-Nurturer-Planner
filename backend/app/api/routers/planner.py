@@ -7,14 +7,13 @@ selected theme and the pipeline returns a fully personalised,
 safety-audited weekly curriculum plan.
 """
 
-import asyncio
 import io
 import logging
 import re as _re
 import uuid
 from datetime import date, timedelta
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, update as sa_update
@@ -29,7 +28,7 @@ from app.services.pdf_service import (
     generate_weekly_pdf, upload_pdf_to_gcs, save_pdf_url,
     delete_pdf_from_gcs, delete_plan_assets_from_gcs,
 )
-from app.api.routers.theme_pool import refill_theme_pool_bg
+from app.services.task_service import enqueue_theme_refill
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +133,7 @@ async def youtube_search(q: str, exclude_id: str | None = None):
 
 
 @router.post("/generate")
-async def generate_plan(request: GeneratePlanRequest, background_tasks: BackgroundTasks):
+async def generate_plan(request: GeneratePlanRequest):
     """Trigger the full Architect → Auditor → Personalizer pipeline,
     or instantly resurrect a sleeping plan if the pool theme has a plan_id.
 
@@ -227,7 +226,7 @@ async def generate_plan(request: GeneratePlanRequest, background_tasks: Backgrou
             plan_id_str = str(existing_plan_to_resurrect.id)
 
     # Kick off background theme pool refill immediately (don't wait for plan gen)
-    background_tasks.add_task(refill_theme_pool_bg, user_uid)
+    await enqueue_theme_refill(user_uid)
 
     # Fast path: resurrected plan — return instantly, skip LangGraph
     if plan_data:
@@ -306,7 +305,6 @@ async def swap_theme(
     user_id: str,
     current_plan_id: str,
     pool_theme_id: str,
-    background_tasks: BackgroundTasks,
 ):
     """Swap the active plan's theme back into the pool and promote a pool theme.
 
@@ -449,7 +447,7 @@ async def swap_theme(
     # ── Promote: reuse existing plan or generate a new one ─────────
 
     # A pool slot was consumed — refill in the background regardless of path
-    background_tasks.add_task(refill_theme_pool_bg, user_uid)
+    await enqueue_theme_refill(user_uid)
 
     if existing_plan_id:
         # The promoted pool theme already has a generated plan (sleeping/

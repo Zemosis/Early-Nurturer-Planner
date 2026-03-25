@@ -10,16 +10,16 @@ generation for any missing slots.
 import asyncio
 import logging
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func
 
 from app.agents.tools import fetch_student_context, generate_theme_options
 from app.db.database import async_session_factory
 from app.db.models import ThemePool, WeeklyPlan
 from app.services.pdf_service import delete_plan_assets_from_gcs
+from app.services.task_service import enqueue_theme_refill
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,8 @@ router = APIRouter(prefix="/api/theme-pool", tags=["Theme Pool"])
 POOL_SIZE = 5
 
 # ── Per-user generation locks ─────────────────────────────────
-# Prevents concurrent background refills for the same user.
+# Prevents concurrent in-process refills for the same user (local dev mode).
 _generation_locks: dict[uuid.UUID, asyncio.Lock] = {}
-_generating_users: set[uuid.UUID] = set()  # track who has an in-flight generation
 
 
 def _get_user_lock(user_id: uuid.UUID) -> asyncio.Lock:
@@ -151,7 +150,6 @@ async def _background_refill(user_id: uuid.UUID, count: int) -> None:
         return
 
     async with lock:
-        _generating_users.add(user_id)
         try:
             async with async_session_factory() as session:
                 # Re-check how many are actually missing (another task may have filled them)
@@ -172,26 +170,6 @@ async def _background_refill(user_id: uuid.UUID, count: int) -> None:
                 logger.info("ThemePool: background refill complete for user %s", user_id)
         except Exception as e:
             logger.error("ThemePool: background refill failed for user %s: %s", user_id, e)
-        finally:
-            _generating_users.discard(user_id)
-
-
-async def refill_theme_pool_bg(user_id: uuid.UUID) -> None:
-    """Public entry point for background theme pool refill.
-
-    Called from planner.py after a theme is consumed during plan generation.
-    Safe to call multiple times — uses the per-user lock to prevent duplicates.
-    """
-    async with async_session_factory() as session:
-        result = await session.execute(
-            select(func.count(ThemePool.id))
-            .where(ThemePool.user_id == user_id, ThemePool.is_used == False)
-        )
-        current_count = result.scalar() or 0
-
-    missing = POOL_SIZE - current_count
-    if missing > 0:
-        await _background_refill(user_id, missing)
 
 
 # ── Endpoints ─────────────────────────────────────────────────
@@ -199,11 +177,15 @@ async def refill_theme_pool_bg(user_id: uuid.UUID) -> None:
 
 @router.get("/{user_id}")
 async def get_theme_pool(user_id: str):
-    """Return the user's active theme pool.
+    """Return the user's active theme pool (read-only).
 
-    Returns whatever themes currently exist immediately. If fewer than
-    POOL_SIZE are present, kicks off background generation (unless one
-    is already running) and sets ``generating=True`` in the response.
+    Returns whatever themes currently exist immediately.
+    ``generating`` is True when the pool has fewer than POOL_SIZE themes,
+    signalling the frontend to continue polling.
+
+    This endpoint NEVER triggers generation itself — that is done by
+    the POST endpoints (generate_plan, swap_theme, refresh) which
+    enqueue Cloud Tasks (or in-process tasks in local dev).
 
     First-time users (0 themes) will block until the initial batch is
     ready so they aren't shown an empty screen.
@@ -247,11 +229,8 @@ async def get_theme_pool(user_id: str):
             "pool_size": POOL_SIZE,
         }
 
-    # Existing user with partial pool: return what we have, background-fill the rest
-    is_generating = user_uid in _generating_users
-    if missing > 0 and not is_generating:
-        asyncio.create_task(_background_refill(user_uid, missing))
-        is_generating = True
+    # Count-based inference: if pool is incomplete, generation is in progress
+    is_generating = len(active_themes) < POOL_SIZE
 
     return {
         "themes": [
@@ -314,23 +293,17 @@ async def refresh_theme_pool(user_id: str, request: RefreshRequest):
                 t.is_used = True
 
         missing = POOL_SIZE - len(kept)
-        try:
-            new_rows = await _generate_and_store(user_uid, missing, session)
-            kept.extend(new_rows)
-            await session.commit()
-        except Exception as e:
-            logger.error("ThemePool refresh failed: %s", e)
-            await session.rollback()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Theme refresh failed: {e}",
-            )
+        await session.commit()
 
-        return {
-            "themes": [
-                ThemePoolItem(id=str(t.id), theme_data=t.theme_data, plan_id=str(t.plan_id) if t.plan_id else None)
-                for t in kept[:POOL_SIZE]
-            ],
-            "generating": False,
-            "pool_size": POOL_SIZE,
-        }
+    # Enqueue background generation for the missing slots
+    if missing > 0:
+        await enqueue_theme_refill(user_uid)
+
+    return {
+        "themes": [
+            ThemePoolItem(id=str(t.id), theme_data=t.theme_data, plan_id=str(t.plan_id) if t.plan_id else None)
+            for t in kept[:POOL_SIZE]
+        ],
+        "generating": missing > 0,
+        "pool_size": POOL_SIZE,
+    }

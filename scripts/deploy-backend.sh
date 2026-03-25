@@ -27,10 +27,14 @@ DB_USER="postgres"
 DB_PASS="early-nurturer-planner1231!"
 DB_NAME="nurture_db"
 YOUTUBE_KEY=""
+WORKER_API_KEY=""
+CLOUD_RUN_URL=""
 
 if [[ -f "$ENV_FILE" ]]; then
-  # Extract YOUTUBE_API_KEY from .env (handles spaces around =)
+  # Extract secrets from .env (handles spaces around =)
   YOUTUBE_KEY=$(grep -E '^YOUTUBE_API_KEY' "$ENV_FILE" | sed 's/.*=\s*//' | tr -d '[:space:]') || true
+  WORKER_API_KEY=$(grep -E '^WORKER_API_KEY' "$ENV_FILE" | sed 's/.*=\s*//' | tr -d '[:space:]') || true
+  CLOUD_RUN_URL=$(grep -E '^CLOUD_RUN_URL' "$ENV_FILE" | sed 's/.*=\s*//' | tr -d '[:space:]') || true
 fi
 
 # Cloud Run connects to Cloud SQL via Unix socket
@@ -43,6 +47,14 @@ ENV_VARS+=",VERTEX_AI_LOCATION=${REGION}"
 
 if [[ -n "$YOUTUBE_KEY" ]]; then
   ENV_VARS+=",YOUTUBE_API_KEY=${YOUTUBE_KEY}"
+fi
+
+if [[ -n "$WORKER_API_KEY" ]]; then
+  ENV_VARS+=",WORKER_API_KEY=${WORKER_API_KEY}"
+fi
+
+if [[ -n "$CLOUD_RUN_URL" ]]; then
+  ENV_VARS+=",CLOUD_RUN_URL=${CLOUD_RUN_URL}"
 fi
 
 # ── Deploy ────────────────────────────────────────────────────
