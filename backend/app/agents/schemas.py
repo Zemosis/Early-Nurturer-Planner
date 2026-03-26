@@ -388,6 +388,10 @@ class SongSchema(BaseModel):
         ...,
         description="Approximate duration as a string (e.g. '2:30').",
     )
+    youtube_url: str = Field(
+        default="",
+        description="YouTube embed URL (filled by the Enricher, not the Architect).",
+    )
 
 
 class YogaPoseSchema(BaseModel):
@@ -600,4 +604,77 @@ class WeekPlanSchema(BaseModel):
         ...,
         description="Parent-facing newsletter with formal and warm versions, "
                     "learning goals, and a home-connection suggestion.",
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+#  MAP-REDUCE INTERMEDIATE SCHEMAS (Phase 3)
+# ══════════════════════════════════════════════════════════════
+
+
+class MasterSkeletonSchema(BaseModel):
+    """Skeleton output from the Master Architect — everything except daily_plans.
+
+    Used as the structured output target for the first LLM call in the
+    2-way split pipeline. The Day Architect receives this skeleton as
+    context when generating the 5 daily plans.
+    """
+
+    id: str = Field(
+        ...,
+        description="Unique identifier for this week plan "
+                    "(e.g. 'week-1-gentle-rain').",
+    )
+    week_number: int = Field(
+        ...,
+        description="Week number in the curriculum year (1-based).",
+    )
+    week_range: str = Field(
+        ...,
+        description="Date range string (e.g. '3/10 - 3/14').",
+    )
+    theme: str = Field(
+        ...,
+        description="Theme name for this week (e.g. 'Gentle Rain').",
+    )
+    theme_emoji: str = Field(
+        ...,
+        description="Emoji representing the theme (e.g. '🌧️').",
+    )
+    palette: ThemePalette = Field(
+        ...,
+        description="Four-color hex palette for this week's UI surfaces.",
+    )
+    domains: list[str] = Field(
+        ...,
+        description="Developmental domains covered this week (at least 2) "
+                    "(e.g. ['Fine Motor', 'Language', 'Sensory', 'Gross Motor']).",
+    )
+    objectives: list[ObjectiveSchema] = Field(
+        ...,
+        description="2+ developmental objectives for the week, each tied to a domain.",
+    )
+    circle_time: CircleTimeSchema = Field(
+        ...,
+        description="Full circle-time plan: letter, color, shape, songs, "
+                    "yoga poses, read-aloud, and discussion prompt.",
+    )
+    newsletter: NewsletterSchema = Field(
+        ...,
+        description="Parent-facing newsletter with formal and warm versions, "
+                    "learning goals, and a home-connection suggestion.",
+    )
+
+
+class DailyPlansOutputSchema(BaseModel):
+    """Output wrapper from the Day Architect — all 5 days with personalization.
+
+    Used as the structured output target for the second LLM call in the
+    2-way split pipeline.
+    """
+
+    daily_plans: list[DailyPlanSchema] = Field(
+        ...,
+        description="Exactly 5 daily plans (Monday through Friday), each with "
+                    "a focus domain and exactly 1 personalized activity.",
     )

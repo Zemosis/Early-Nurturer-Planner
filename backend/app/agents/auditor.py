@@ -1,4 +1,5 @@
 """
+# BYPASSED in Phase 3 — safety enforced via system prompts in day architect.
 LangGraph Node — Safety Auditor.
 
 The safety net of the multi-agent pipeline. Receives the Architect's

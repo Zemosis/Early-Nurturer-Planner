@@ -14,6 +14,7 @@ import re
 
 from google import genai
 from sqlalchemy import select
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.agents.state import PlannerState
 from app.agents.tools import search_youtube_video
@@ -129,33 +130,30 @@ async def _find_yoga_poses(theme: str, keywords: list[str], limit: int = 3) -> l
         return []
 
 
-# ── Main enricher node ────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  STANDALONE: enrich_circle_time (callable from parallel node)
+# ══════════════════════════════════════════════════════════════
 
-async def youtube_enricher(state: PlannerState) -> dict:
-    """LangGraph node: enrich the draft plan with YouTube songs and DB yoga poses.
 
-    - Songs: searches YouTube, overwrites title/duration/youtube_url.
-    - Yoga: vector search against yoga_poses table, overwrites entirely.
+@retry(
+    wait=wait_exponential(min=1, max=10),
+    stop=stop_after_attempt(3),
+    reraise=True,
+)
+async def enrich_circle_time(circle_time: dict, theme: str) -> dict:
+    """Enrich circle_time dict with real YouTube songs and DB yoga poses.
+
+    Standalone async function that can be called directly (e.g. from
+    asyncio.gather in the parallel_generate node) without requiring
+    LangGraph state.
 
     Args:
-        state: The current PlannerState dictionary.
+        circle_time: CircleTimeSchema as a dict (mutated in-place AND returned).
+        theme: Theme name string for search queries.
 
     Returns:
-        A dict with the updated plan.
+        The enriched circle_time dict.
     """
-    plan = state.get("personalized_plan") or state.get("draft_plan")
-    plan_key = "personalized_plan" if state.get("personalized_plan") else "draft_plan"
-    if not plan:
-        logger.warning("Enricher: no plan to enrich")
-        return {}
-
-    theme = plan.get("theme", "")
-    circle_time = plan.get("circle_time")
-    if not circle_time:
-        logger.warning("Enricher: no circle_time in plan")
-        return {}
-
-    # ── Song YouTube search (with deduplication) ──────────────
     greeting = circle_time.get("greeting_song")
     goodbye = circle_time.get("goodbye_song")
 
@@ -172,7 +170,6 @@ async def youtube_enricher(state: PlannerState) -> dict:
             greeting["youtube_url"] = g_result["embed_url"]
             greeting["title"] = g_result["title"]
             greeting["duration"] = g_result["duration"]
-            # Extract video_id from embed_url for dedup
             greeting_video_id = g_result["embed_url"].rsplit("/", 1)[-1]
             enriched += 1
             logger.info("Enricher: greeting → '%s' (%s)",
@@ -206,7 +203,6 @@ async def youtube_enricher(state: PlannerState) -> dict:
     ]
     yoga_result = await _find_yoga_poses(theme, yoga_keywords, limit=3)
 
-    # ── Apply yoga results ────────────────────────────────────
     if yoga_result:
         circle_time["yoga_poses"] = yoga_result
         enriched += len(yoga_result)
@@ -216,5 +212,27 @@ async def youtube_enricher(state: PlannerState) -> dict:
         logger.warning("Enricher: yoga vector search returned no results")
 
     logger.info("Enricher: enriched %d items total", enriched)
+    return circle_time
 
+
+# ── LangGraph node wrapper (kept for backward compatibility) ──
+
+async def youtube_enricher(state: PlannerState) -> dict:
+    """LangGraph node: thin wrapper around enrich_circle_time.
+
+    Reads circle_time from the plan in state, enriches it, and writes back.
+    """
+    plan = state.get("personalized_plan") or state.get("draft_plan")
+    plan_key = "personalized_plan" if state.get("personalized_plan") else "draft_plan"
+    if not plan:
+        logger.warning("Enricher: no plan to enrich")
+        return {}
+
+    theme = plan.get("theme", "")
+    circle_time = plan.get("circle_time")
+    if not circle_time:
+        logger.warning("Enricher: no circle_time in plan")
+        return {}
+
+    await enrich_circle_time(circle_time, theme)
     return {plan_key: plan}

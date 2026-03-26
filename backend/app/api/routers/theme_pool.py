@@ -9,6 +9,7 @@ generation for any missing slots.
 
 import asyncio
 import logging
+import time
 import uuid
 
 from fastapi import APIRouter, HTTPException
@@ -30,6 +31,8 @@ POOL_SIZE = 5
 # ── Per-user generation locks ─────────────────────────────────
 # Prevents concurrent in-process refills for the same user (local dev mode).
 _generation_locks: dict[uuid.UUID, asyncio.Lock] = {}
+_last_refill_trigger: dict[uuid.UUID, float] = {}
+_REFILL_COOLDOWN = 30.0  # seconds — max 1 enqueue per user per interval
 
 
 def _get_user_lock(user_id: uuid.UUID) -> asyncio.Lock:
@@ -231,6 +234,17 @@ async def get_theme_pool(user_id: str):
 
     # Count-based inference: if pool is incomplete, generation is in progress
     is_generating = len(active_themes) < POOL_SIZE
+
+    # Self-healing: if themes are missing and no POST triggered a refill,
+    # kick one off now (cooldown prevents polling-bomb).
+    if is_generating:
+        now = time.time()
+        last = _last_refill_trigger.get(user_uid, 0)
+        if now - last > _REFILL_COOLDOWN:
+            _last_refill_trigger[user_uid] = now
+            await enqueue_theme_refill(user_uid)
+            logger.info("ThemePool GET: triggered background refill for user %s (%d missing)",
+                         user_id, missing)
 
     return {
         "themes": [

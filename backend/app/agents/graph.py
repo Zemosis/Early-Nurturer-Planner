@@ -1,32 +1,30 @@
 """
-LangGraph pipeline — Curriculum Planner Graph.
-
-Wires the Architect → Auditor → Personalizer agents into a single
-executable graph with conditional routing and Postgres persistence.
+LangGraph pipeline — Curriculum Planner Graph (Phase 3: 2-Way Split).
 
 Graph topology:
-    START → fetch_context → architect → auditor
-                   ↑                       ↓
-                   └──── (revise) ←── route_auditor
-                                          ↓
-                                    (personalize)
-                                          ↓
-                              personalizer → youtube_enricher → save → END
+    START → fetch_context → master_architect → parallel_generate → assemble_plan → save → END
+
+The parallel_generate node runs two coroutines concurrently via asyncio.gather:
+  1. generate_days   — all 5 daily plans with personalization baked in
+  2. enrich_circle_time — YouTube songs + DB yoga poses on the skeleton's circle_time
+
+The auditor and personalizer nodes are bypassed (safety enforced via system prompts).
 """
 
 import asyncio
+import copy
 import json
 import logging
 import uuid
 
 from langgraph.graph import END, START, StateGraph
+from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.agents.architect import curriculum_architect
-from app.agents.auditor import safety_auditor
-from app.agents.personalizer import personalize_plan
-from app.agents.youtube_enricher import youtube_enricher
+from app.agents.architect import master_architect, generate_days
+from app.agents.youtube_enricher import enrich_circle_time
+from app.agents.schemas import WeekPlanSchema
 from app.agents.state import PlannerState
 from app.agents.tools import fetch_student_context, query_pedagogy
 from app.db.database import async_session_factory
@@ -225,30 +223,109 @@ async def save_plan_node(state: PlannerState) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════
-#  ROUTING LOGIC
+#  NODE: Parallel Generate (day architect + YouTube enricher)
 # ══════════════════════════════════════════════════════════════
 
 
-def route_auditor(state: PlannerState) -> str:
-    """Conditional edge after the Auditor node.
+async def parallel_generate_node(state: PlannerState) -> dict:
+    """Run day generation and YouTube/yoga enrichment concurrently.
 
-    Returns:
-        "personalize" — if plan accepted, iteration cap reached, or error present.
-        "revise"      — if plan rejected and iterations remain.
+    Uses asyncio.gather with return_exceptions=True so that one failure
+    doesn't cancel the other. Day generation failure is fatal; enrichment
+    failure is gracefully degraded (plan proceeds without enrichment).
     """
-    # If there's an error in state, move forward to avoid infinite loops
-    if state.get("error"):
-        logger.info("RouteAuditor: error in state, routing to personalize")
-        return "personalize"
+    skeleton = state.get("master_skeleton")
+    if not skeleton:
+        return {"error": "parallel_generate: no master_skeleton in state."}
 
-    audit_result = state.get("audit_result") or {}
-    accepted = audit_result.get("accepted", False)
-    iteration_count = state.get("iteration_count", 0)
+    student_ctx = state.get("student_context", "No student data available.")
+    pedagogy_ctx = state.get("pedagogy_context", "No pedagogy data available.")
 
-    if accepted or iteration_count >= 2:
-        return "personalize"
+    # Deep-copy circle_time so enrich_circle_time can mutate it safely
+    circle_time_copy = copy.deepcopy(skeleton.get("circle_time", {}))
+    theme = skeleton.get("theme", "")
 
-    return "revise"
+    days_coro = generate_days(skeleton, student_ctx, pedagogy_ctx)
+    yt_coro = enrich_circle_time(circle_time_copy, theme)
+
+    logger.info("ParallelGenerate: launching day architect + enricher concurrently")
+    results = await asyncio.gather(days_coro, yt_coro, return_exceptions=True)
+
+    # ── Safeguard #1: explicitly check for Exception objects ──
+    days_result = results[0]
+    yt_result = results[1]
+
+    if isinstance(days_result, Exception):
+        logger.error("ParallelGenerate: day generation FAILED — %s", days_result)
+        return {
+            "daily_plans_raw": None,
+            "enriched_circle_time": None,
+            "error": f"Day generation failed: {days_result}",
+        }
+
+    if isinstance(yt_result, Exception):
+        logger.warning("ParallelGenerate: enrichment failed, continuing without — %s", yt_result)
+        enriched_ct = None
+    else:
+        enriched_ct = yt_result
+
+    logger.info("ParallelGenerate: got %d daily plans, enrichment=%s",
+                len(days_result), enriched_ct is not None)
+
+    return {
+        "daily_plans_raw": days_result,
+        "enriched_circle_time": enriched_ct,
+        "error": None,
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+#  NODE: Assemble Plan (merge skeleton + days + enrichment)
+# ══════════════════════════════════════════════════════════════
+
+
+async def assemble_plan_node(state: PlannerState) -> dict:
+    """Merge master_skeleton + daily_plans_raw + enriched_circle_time into a
+    complete WeekPlanSchema dict and write it to draft_plan.
+
+    Validates the assembled plan through Pydantic to catch any structural
+    issues before saving.
+    """
+    skeleton = state.get("master_skeleton")
+    daily_plans = state.get("daily_plans_raw")
+    enriched_ct = state.get("enriched_circle_time")
+
+    if not skeleton:
+        return {"error": "assemble_plan: no master_skeleton in state."}
+    if not daily_plans:
+        return {"error": "assemble_plan: no daily_plans_raw in state."}
+
+    # Build the full plan dict
+    plan = {**skeleton}
+    plan["daily_plans"] = daily_plans
+
+    # Apply enriched circle_time if YouTube/yoga enrichment succeeded
+    if enriched_ct:
+        plan["circle_time"] = enriched_ct
+
+    # Validate the assembled plan through Pydantic (Safeguard #3: pure dict)
+    try:
+        adapter = TypeAdapter(WeekPlanSchema)
+        validated = adapter.validate_python(plan)
+        final_plan = validated.model_dump(mode="json")
+    except Exception as e:
+        logger.error("AssemblePlan: Pydantic validation failed — %s", e)
+        # Fall back to raw dict if validation fails (better than no plan)
+        logger.warning("AssemblePlan: falling back to unvalidated plan dict")
+        final_plan = plan
+
+    logger.info("AssemblePlan: assembled plan for theme '%s' with %d days",
+                final_plan.get("theme", "?"), len(final_plan.get("daily_plans", [])))
+
+    return {
+        "draft_plan": final_plan,
+        "error": None,
+    }
 
 
 # ══════════════════════════════════════════════════════════════
@@ -257,7 +334,10 @@ def route_auditor(state: PlannerState) -> str:
 
 
 def build_planner_graph():
-    """Compile the full Architect → Auditor → Personalizer LangGraph.
+    """Compile the Phase 3 Map-Reduce planner graph.
+
+    Pipeline:
+        fetch_context → master_architect → parallel_generate → assemble_plan → save
 
     Returns a compiled StateGraph ready to be invoked with:
         graph = build_planner_graph()
@@ -274,23 +354,17 @@ def build_planner_graph():
 
     # ── Add nodes ─────────────────────────────────────────────
     builder.add_node("fetch_context", fetch_context_node)
-    builder.add_node("architect", curriculum_architect)
-    builder.add_node("auditor", safety_auditor)
-    builder.add_node("youtube_enricher", youtube_enricher)
-    builder.add_node("personalizer", personalize_plan)
+    builder.add_node("master_architect", master_architect)
+    builder.add_node("parallel_generate", parallel_generate_node)
+    builder.add_node("assemble_plan", assemble_plan_node)
     builder.add_node("save", save_plan_node)
 
-    # ── Wire edges ────────────────────────────────────────────
+    # ── Wire edges (linear — no conditional routing) ──────────
     builder.add_edge(START, "fetch_context")
-    builder.add_edge("fetch_context", "architect")
-    builder.add_edge("architect", "auditor")
-    builder.add_conditional_edges(
-        "auditor",
-        route_auditor,
-        {"personalize": "personalizer", "revise": "architect"},
-    )
-    builder.add_edge("personalizer", "youtube_enricher")
-    builder.add_edge("youtube_enricher", "save")
+    builder.add_edge("fetch_context", "master_architect")
+    builder.add_edge("master_architect", "parallel_generate")
+    builder.add_edge("parallel_generate", "assemble_plan")
+    builder.add_edge("assemble_plan", "save")
     builder.add_edge("save", END)
 
     return builder.compile()

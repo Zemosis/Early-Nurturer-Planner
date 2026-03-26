@@ -17,7 +17,13 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-_LOCAL_MODE = not settings.CLOUD_RUN_URL
+def _is_local_url(url: str) -> bool:
+    """Return True if CLOUD_RUN_URL is empty or points to a local address."""
+    if not url:
+        return True
+    return any(host in url for host in ("localhost", "127.0.0.1", "0.0.0.0"))
+
+_LOCAL_MODE = _is_local_url(settings.CLOUD_RUN_URL)
 
 
 async def enqueue_theme_refill(user_id: uuid.UUID) -> None:

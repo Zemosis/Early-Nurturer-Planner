@@ -1,4 +1,5 @@
 """
+# BYPASSED in Phase 3 — personalization merged into day architect system prompt.
 LangGraph Node — Personalizer.
 
 The final agent in the Architect → Auditor → Personalizer pipeline.

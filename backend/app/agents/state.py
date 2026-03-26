@@ -34,6 +34,11 @@ class PlannerState(TypedDict, total=False):
     # ── Architect output ──────────────────────────────────────
     draft_plan: dict | None       # WeekPlanSchema serialised as dict
 
+    # ── Map-Reduce intermediates (Phase 3) ────────────────────
+    master_skeleton: dict | None       # MasterSkeletonSchema as dict
+    daily_plans_raw: list[dict] | None # 5 DailyPlanSchema dicts from day architect
+    enriched_circle_time: dict | None  # circle_time dict after YouTube/yoga enrichment
+
     # ── Auditor output ────────────────────────────────────────
     audit_result: dict | None     # AuditResultSchema serialised as dict
 
