@@ -71,8 +71,6 @@ gcloud run deploy "$SERVICE_NAME" \
   --set-env-vars "$ENV_VARS" \
   --memory 2Gi \
   --cpu 2 \
-  --min-instances 1 \
-  --no-cpu-throttling \
   --timeout 300 \
   --port 8080
 
