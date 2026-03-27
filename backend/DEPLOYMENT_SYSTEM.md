@@ -1,36 +1,31 @@
-# Deployment System - Complete Documentation
+# Deployment System
 
 ## Overview
 
-The **Early Nurturer Planner Backend** is deployed to **Google Cloud Run** as a containerized FastAPI application. Cloud Run provides serverless auto-scaling, built-in HTTPS, and native integration with Cloud SQL via the Auth Proxy.
+The **Early Nurturer Planner Backend** is deployed to **Google Cloud Run** as a containerized FastAPI application. The database is hosted on **Supabase** (PostgreSQL), connected via direct TCP.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  Google Cloud Run                     │
-│                                                       │
-│  ┌─────────────────────────────────────────────┐     │
-│  │  Docker Container (python:3.12-slim)         │     │
-│  │                                               │     │
-│  │  uvicorn main:app --host 0.0.0.0 --port 8080│     │
-│  │                                               │     │
-│  │  FastAPI ← LangGraph ← Gemini (Vertex AI)   │     │
-│  └──────────────┬────────────────────────────────┘     │
-│                 │ Unix socket                          │
-│  ┌──────────────▼────────────────────────┐            │
-│  │  Cloud SQL Auth Proxy (auto-mounted)   │            │
-│  │  /cloudsql/project:region:instance     │            │
-│  └──────────────┬────────────────────────┘            │
-└─────────────────┼─────────────────────────────────────┘
-                  │
-    ┌─────────────▼─────────────┐
-    │  Cloud SQL (PostgreSQL)    │
-    │  nurture-postgres          │
-    │  nurture_db                │
-    └───────────────────────────┘
++-------------------------------------------------------+
+|                  Google Cloud Run                       |
+|                                                         |
+|  +-----------------------------------------------+     |
+|  |  Docker Container (python:3.12-slim)           |     |
+|  |                                                 |     |
+|  |  uvicorn main:app --host 0.0.0.0 --port 8080  |     |
+|  |                                                 |     |
+|  |  FastAPI <-- LangGraph <-- Gemini (Vertex AI)  |     |
+|  +--------------------+----------------------------+     |
+|                       |                                  |
++-------------------------------------------------------+
+                        | Direct TCP (port 5432)
+          +-------------v-----------------+
+          |  Supabase (PostgreSQL)         |
+          |  db.xxx.supabase.co            |
+          +-------------------------------+
 ```
 
 ---
@@ -49,33 +44,17 @@ EXPOSE 8080
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-**Key details:**
-- Entry point is `main:app` (not `app.main:app`) — `main.py` lives at the backend root
+- Entry point is `main:app` (not `app.main:app`) -- `main.py` lives at the backend root
 - Port 8080 is Cloud Run's default
 - No `.env` or SA key JSON inside the container (excluded by `.dockerignore`)
 
 ### `backend/.dockerignore`
 
-```
-__pycache__/
-*.pyc
-*.pyo
-.env
-venv/
-.venv/
-.git/
-.gitignore
-dev-log.md
-scripts/
-alembic/
-*.json
-```
-
-**Excludes:** SA key JSON files, dev scripts, alembic migrations (run separately), dev log, virtual environments.
+Excludes: SA key JSON files, dev scripts, alembic migrations, dev log, virtual environments.
 
 ### `scripts/deploy-backend.sh`
 
-One-command deployment script. Reads `YOUTUBE_API_KEY` from `backend/.env`, builds the Cloud SQL Unix socket `DATABASE_URL`, and runs `gcloud run deploy` with all env vars.
+One-command deployment. Reads `DATABASE_URL` and secrets from `backend/.env` and runs `gcloud run deploy` with all env vars.
 
 ```bash
 ./scripts/deploy-backend.sh
@@ -89,10 +68,10 @@ One-command deployment script. Reads `YOUTUBE_API_KEY` from `backend/.env`, buil
 
 | Variable | Example Value |
 |---|---|
-| `DATABASE_URL` | `postgresql+asyncpg://postgres:pass@34.69.136.252:5432/nurture_db` |
+| `DATABASE_URL` | `postgresql+asyncpg://postgres:pass@db.xxx.supabase.co:5432/postgres` |
 | `GCP_PROJECT_ID` | `early-nurturer-planner` |
 | `GCS_BUCKET_NAME` | `early-nurturer-planner-assets` |
-| `GOOGLE_APPLICATION_CREDENTIALS` | `/path/to/nurture-backend-sa-key-v2.json` |
+| `GOOGLE_APPLICATION_CREDENTIALS` | `/path/to/sa-key.json` |
 | `VERTEX_AI_LOCATION` | `us-central1` |
 | `YOUTUBE_API_KEY` | `AIzaSy...` |
 
@@ -100,11 +79,11 @@ One-command deployment script. Reads `YOUTUBE_API_KEY` from `backend/.env`, buil
 
 | Variable | Value | Notes |
 |---|---|---|
-| `DATABASE_URL` | `postgresql+asyncpg://postgres:pass@/nurture_db?host=/cloudsql/project:region:instance` | Unix socket format |
+| `DATABASE_URL` | `postgresql+asyncpg://postgres:pass@db.xxx.supabase.co:5432/postgres` | Same Supabase URL |
 | `GCP_PROJECT_ID` | `early-nurturer-planner` | |
 | `VERTEX_AI_LOCATION` | `us-central1` | |
 | `YOUTUBE_API_KEY` | `AIzaSy...` | |
-| `WORKER_API_KEY` | `shared-secret` | Shared secret for internal worker auth |
+| `WORKER_API_KEY` | `shared-secret` | Internal worker auth |
 | `CLOUD_TASKS_QUEUE` | `theme-generation` | Queue name |
 | `CLOUD_RUN_URL` | `https://...run.app` | Service URL for task callbacks |
 | `GOOGLE_APPLICATION_CREDENTIALS` | *(not set)* | Cloud Run uses built-in SA identity |
@@ -119,22 +98,12 @@ One-command deployment script. Reads `YOUTUBE_API_KEY` from `backend/.env`, buil
 
 ## Database Connectivity
 
-### Local → Cloud SQL
-- Direct TCP to public IP: `34.69.136.252:5432`
-- Requires IP whitelisting (use `scripts/update-db-ip.sh`)
+Both local development and Cloud Run connect to Supabase via direct TCP. No Cloud SQL proxy or Unix sockets needed.
 
-### Cloud Run → Cloud SQL
-- Unix socket via Cloud SQL Auth Proxy
-- `--add-cloudsql-instances early-nurturer-planner:us-central1:nurture-postgres`
-- Socket path: `/cloudsql/early-nurturer-planner:us-central1:nurture-postgres`
-- No IP whitelisting needed
-
-### DATABASE_URL Format Comparison
-
-| Environment | Format |
+| Environment | DATABASE_URL Format |
 |---|---|
-| **Local** | `postgresql+asyncpg://user:pass@34.69.136.252:5432/nurture_db` |
-| **Cloud Run** | `postgresql+asyncpg://user:pass@/nurture_db?host=/cloudsql/project:region:instance` |
+| **Local** | `postgresql+asyncpg://postgres:pass@db.xxx.supabase.co:5432/postgres` |
+| **Cloud Run** | Same as local (direct TCP to Supabase) |
 
 ---
 
@@ -142,38 +111,34 @@ One-command deployment script. Reads `YOUTUBE_API_KEY` from `backend/.env`, buil
 
 ```python
 allow_origins=[
-    "http://localhost:3000",     # Next.js
-    "http://localhost:5173",     # Vite dev
-    "http://localhost:5174",     # Vite alt port
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://early-nurturer-planner.web.app",
     "https://early-nurturer-api-872290613394.us-central1.run.app",
 ]
 ```
 
-When the frontend is deployed to its own domain (e.g. Vercel, Firebase Hosting), add that origin here and redeploy.
+Add new frontend origins here and redeploy.
 
 ---
 
 ## Frontend API Integration (`src/app/utils/api.ts`)
 
-The frontend uses a `VITE_API_BASE_URL` environment variable to switch between local and production:
-
 ```typescript
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
-// Local dev: API_BASE = "" → /api/... → Vite proxy → localhost:8000
-// Production: API_BASE = "https://...run.app" → direct to Cloud Run
+// Local dev: "" -> /api/... -> Vite proxy -> localhost:8000
+// Production: "https://...run.app" -> direct to Cloud Run
 ```
-
-- **Local dev:** `VITE_API_BASE_URL` is empty → requests go to `/api/...` → Vite proxy forwards to `localhost:8000`
-- **Production build:** `npm run build` loads `.env.production` → requests go directly to Cloud Run URL
 
 ---
 
 ## Deploy Checklist
 
 ### First-Time Setup
-1. ✅ Enable Cloud Run, Cloud Build, Cloud SQL, and Cloud Tasks APIs
-2. ✅ Create Cloud SQL instance (`nurture-postgres`)
-3. ✅ Create Cloud Tasks queue:
+1. Enable Cloud Run, Cloud Build, and Cloud Tasks APIs
+2. Create Supabase project and enable pgvector extension
+3. Create Cloud Tasks queue:
    ```bash
    gcloud tasks queues create theme-generation \
      --location=us-central1 \
@@ -182,24 +147,19 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
      --max-attempts=3 \
      --min-backoff=10s
    ```
-4. ✅ Grant Cloud Run SA → Cloud SQL Client role
-5. ✅ Grant Cloud Run SA → Vertex AI User role
-6. ✅ Grant Cloud Run SA → Cloud Tasks Enqueuer role
-7. ✅ Run `alembic upgrade head` against the database
-8. ✅ Run `python scripts/seed_db.py` for mock data
+4. Grant Cloud Run SA: Vertex AI User, Cloud Tasks Enqueuer roles
+5. Run `alembic upgrade head` against Supabase
+6. Run `python scripts/seed_db.py` and `python scripts/seed_yoga_catalog.py`
 
 ### Every Deploy
 1. Make code changes
-2. Run `./scripts/deploy-backend.sh` (or `gcloud run deploy ...`)
+2. Run `./scripts/deploy-backend.sh`
 3. Verify at `https://early-nurturer-api-872290613394.us-central1.run.app/health`
 4. Test `/docs` for Swagger UI
 
-### After CORS Changes
-- Must redeploy backend for new allowed origins to take effect
-
 ### After Schema Changes
 - Run `alembic revision --autogenerate -m "description"` locally
-- Run `alembic upgrade head` against Cloud SQL
+- Run `alembic upgrade head` against Supabase
 - Redeploy backend
 
 ---
@@ -213,28 +173,19 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 | **Region** | `us-central1` |
 | **Memory** | 2 GiB |
 | **CPU** | 2 vCPU |
-| **Min instances** | 1 (always warm, no cold starts) |
+| **Min instances** | 1 (always warm) |
 | **CPU throttling** | Disabled (always allocated) |
-| **Timeout** | 300s (5 min, for long Gemini pipeline) |
+| **Timeout** | 300s |
 | **Port** | 8080 |
 | **Auth** | Unauthenticated (public) |
-| **Cloud SQL instance** | `early-nurturer-planner:us-central1:nurture-postgres` |
 
 ---
 
 ## Troubleshooting
 
-### `ConnectionRefusedError: [Errno 111]` or `TimeoutError`
-**Cause:** Cloud Run trying to connect via direct IP instead of Unix socket.
-**Fix:** Ensure `--add-cloudsql-instances` is in the deploy command and `DATABASE_URL` uses `?host=/cloudsql/...` format.
-
-### `zsh: event not found: @/nurture_db`
-**Cause:** The `!` in the DB password triggers zsh history expansion in double quotes.
-**Fix:** Use single quotes around `--set-env-vars '...'` or use the deploy script.
-
 ### `GOOGLE_APPLICATION_CREDENTIALS` validation error
-**Cause:** The env var points to a file that doesn't exist in the container.
-**Fix:** Don't set this var on Cloud Run — the field is `str | None = None` (optional).
+**Cause:** Env var points to a file that doesn't exist in the container.
+**Fix:** Don't set this var on Cloud Run -- it uses built-in SA identity.
 
 ### CORS errors from frontend
 **Cause:** Frontend origin not in `allow_origins` list in `main.py`.
@@ -243,3 +194,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 ### Gemini 400 INVALID_ARGUMENT
 **Cause:** `response_schema` too complex (nested constraints).
 **Fix:** Remove `ge`/`le`/`min_length` from deeply nested Pydantic models. Use `Field(description=...)` instead.
+
+### Database connection timeout
+**Cause:** Supabase may pause inactive free-tier projects.
+**Fix:** Resume the project in Supabase dashboard, or check connection string.

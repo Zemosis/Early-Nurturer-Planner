@@ -1,8 +1,8 @@
-# Database Schema System - Complete Documentation
+# Database Schema System
 
 ## Overview
 
-The **Database Layer** uses PostgreSQL with the `pgvector` extension, accessed via SQLAlchemy 2.0's async API backed by `asyncpg`. The schema is divided into two sections: **Relational Models** (core app data) and **Agentic/Vector Models** (AI pipeline audit trail and embeddings).
+The **Database Layer** uses Supabase (PostgreSQL) with the `pgvector` extension, accessed via SQLAlchemy 2.0's async API backed by `asyncpg`. The schema is divided into two sections: **Relational Models** (core app data) and **Agentic/Vector Models** (AI pipeline audit trail and embeddings).
 
 ---
 
@@ -11,54 +11,53 @@ The **Database Layer** uses PostgreSQL with the `pgvector` extension, accessed v
 ### Engine (`app/db/database.py`)
 
 ```
-PostgreSQL (Cloud SQL)
-    ↕  asyncpg driver
+Supabase (PostgreSQL)
+    |  asyncpg driver (direct TCP)
 SQLAlchemy 2.0 Async Engine
-    ↕  pool_size=5, max_overflow=10, pool_pre_ping=True
+    |  pool_size=5, max_overflow=10, pool_pre_ping=True
 async_session_factory (AsyncSession)
-    ↕
+    |
 FastAPI / LangGraph nodes
 ```
 
-- **Local dev:** Direct TCP to Cloud SQL public IP (`34.69.136.252:5432`)
-- **Cloud Run:** Unix socket via Cloud SQL Auth Proxy (`/cloudsql/early-nurturer-planner:us-central1:nurture-postgres`)
+- **Local dev:** Direct TCP to Supabase: `postgresql+asyncpg://postgres:pass@db.xxx.supabase.co:5432/postgres`
+- **Cloud Run:** Same direct TCP connection (no proxy needed)
 
 ### Session Management
-- `get_session()` — Async generator for FastAPI `Depends()`. Auto-commits on success, rolls back on exception.
-- `async_session_factory()` — Used directly in LangGraph nodes (not via `Depends`).
+- `get_session()` -- Async generator for FastAPI `Depends()`. Auto-commits on success, rolls back on exception.
+- `async_session_factory()` -- Used directly in LangGraph nodes (not via `Depends`).
 
 ---
 
 ## Entity Relationship Diagram
 
 ```
-┌──────────┐       ┌──────────────┐       ┌───────────────────┐
-│  users   │──1:N──│   students   │──1:N──│ student_embeddings│
-│          │       │              │       │   (pgvector 768d) │
-│          │       └──────────────┘       └───────────────────┘
-│          │
-│          │──1:N──┌──────────────┐
-│          │       │ weekly_plans │
-│          │       └──────────────┘
-│          │
-│          │──1:N──┌──────────────┐
-│          │       │ chat_history │
-└──────────┘       └──────────────┘
++----------+       +--------------+       +-------------------+
+|  users   |--1:N--|   students   |--1:N--| student_embeddings|
+|          |       |              |       |   (pgvector 768d) |
+|          |       +--------------+       +-------------------+
+|          |
+|          |--1:N--+--------------+
+|          |       | weekly_plans |
+|          |       +--------------+
+|          |
+|          |--1:N--+--------------+
+|          |       | chat_history |
+|          |       +--------------+
+|          |
+|          |--1:N--+--------------+
+|          |       |  theme_pool  |  (pre-generated theme cache)
++----------+       +--------------+
 
-┌─────────────────────┐    ┌──────────────────┐    ┌──────────────────────┐
-│ agent_reasoning_logs │    │ agent_checkpoints │    │   critique_history   │
-│   (audit trail)      │    │  (state snapshots)│    │ (architect↔auditor)  │
-└─────────────────────┘    └──────────────────┘    └──────────────────────┘
++---------------------+    +------------------+    +----------------------+
+| agent_reasoning_logs |    | agent_checkpoints |    |   critique_history   |
+|   (audit trail)      |    |  (state snapshots)|    | (legacy, not active) |
++---------------------+    +------------------+    +----------------------+
 
-┌──────────────────────────┐    ┌──────────────────────┐
-│ vector_store_curriculum   │    │     yoga_poses        │
-│   (RAG chunks, 768d)     │    │  (pose catalog, 768d) │
-└──────────────────────────┘    └──────────────────────┘
-
-┌──────────┐
-│  users   │──1:N──┌──────────────┐
-│          │       │  theme_pool  │  (persistent pre-generated theme cache)
-└──────────┘       └──────────────┘
++--------------------------+    +----------------------+
+| vector_store_curriculum   |    |     yoga_poses        |
+|   (RAG chunks, 768d)     |    |  (pose catalog, 768d) |
++--------------------------+    +----------------------+
 ```
 
 ---
@@ -81,18 +80,18 @@ Educator profile, daycare info, and global settings.
 | `created_at` | TIMESTAMPTZ | server_default now() | |
 | `updated_at` | TIMESTAMPTZ | server_default now(), onupdate | |
 
-**Relationships:** `students` (1:N), `weekly_plans` (1:N), `chat_messages` (1:N) — all cascade delete.
+**Relationships:** `students` (1:N), `weekly_plans` (1:N), `chat_messages` (1:N) -- all cascade delete.
 
 ---
 
 ### `students`
 
-Child profiles — mirrors frontend `Student` interface (`src/app/types/student.ts`).
+Child profiles linked to an educator.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | UUID | PK | Child ID |
-| `user_id` | UUID | FK → users.id, CASCADE | Educator who enrolled this child |
+| `user_id` | UUID | FK -> users.id, CASCADE | Educator who enrolled this child |
 | `name` | VARCHAR(255) | NOT NULL | Child's first name |
 | `birthdate` | TIMESTAMPTZ | NOT NULL | Date of birth |
 | `age_months` | INTEGER | NOT NULL | Current age in months |
@@ -104,85 +103,76 @@ Child profiles — mirrors frontend `Student` interface (`src/app/types/student.
 | `created_at` | TIMESTAMPTZ | | |
 | `updated_at` | TIMESTAMPTZ | | |
 
-**Indexes:** 
-- `ix_students_user_id` — Single-column index on `user_id`
-- `ix_students_user_active` — Composite index on `(user_id, is_active)` (added March 13, 2026 for performance)
-- `ix_students_age_group` — Single-column index on `age_group`
-
-**Relationships:** `user` (N:1), `embeddings` (1:N cascade)
+**Indexes:**
+- `ix_students_user_id` on `user_id`
+- `ix_students_user_active` on `(user_id, is_active)` (composite)
+- `ix_students_age_group` on `age_group`
 
 ---
 
 ### `weekly_plans`
 
-Generated curriculum plans — stores the full plan payload as JSONB.
+Generated curriculum plans with full payload stored as JSONB columns.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | UUID | PK | Plan ID |
-| `user_id` | UUID | FK → users.id, CASCADE | Educator |
-| `week_number` | INTEGER | NOT NULL | Curriculum week number (1, 2, 3...) — always sequential |
-| `year` | INTEGER | NOT NULL | Calendar year (e.g. 2026) |
-| `month` | INTEGER | NOT NULL | Calendar month (1-12) |
-| `week_of_month` | INTEGER | NOT NULL | Week number within the month (1-5) |
-| `week_range` | VARCHAR(50) | NOT NULL | e.g. "3/17 - 3/21" (Monday-Friday) |
+| `user_id` | UUID | FK -> users.id, CASCADE | Educator |
+| `week_number` | INTEGER | NOT NULL | Curriculum week number (sequential: 1, 2, 3...) |
+| `year` | INTEGER | nullable | Calendar year |
+| `month` | INTEGER | nullable | Calendar month (1-12) |
+| `week_of_month` | INTEGER | nullable | Week within month (1-5) |
+| `week_range` | VARCHAR(50) | NOT NULL | e.g. "3/17 - 3/21" |
 | `theme` | VARCHAR(255) | NOT NULL | Theme name |
-| `theme_emoji` | VARCHAR(10) | nullable | e.g. "🦊" |
+| `theme_emoji` | VARCHAR(10) | nullable | e.g. "fox emoji" |
 | `palette` | JSONB | nullable | `{primary, secondary, accent, background}` |
 | `domains` | JSONB | nullable | `["Fine Motor", "Language", "Sensory"]` |
 | `objectives` | JSONB | nullable | `[{domain, goal}]` |
-| `circle_time` | JSONB | nullable | Full circle time data (songs, yoga, letter, etc.) |
+| `circle_time` | JSONB | nullable | Full circle time data |
 | `activities` | JSONB | nullable | Flattened activity list (all 5 days combined) |
 | `newsletter` | JSONB | nullable | `{professional, warm}` versions |
-| `cover_image_url` | VARCHAR(512) | nullable | Public GCS URL to AI-generated cover image |
-| `pdf_url` | VARCHAR(512) | nullable | Public GCS URL to generated PDF |
-| `is_generated` | BOOLEAN | default true | AI-generated vs manually created |
+| `cover_image_url` | VARCHAR(512) | nullable | GCS URL to AI-generated cover image |
+| `pdf_url` | VARCHAR(512) | nullable | GCS URL to generated PDF |
+| `material_urls` | JSONB | nullable | Cached material poster URLs |
+| `is_generated` | BOOLEAN | default true | AI-generated vs manual |
 | `created_at` | TIMESTAMPTZ | | |
 | `updated_at` | TIMESTAMPTZ | | |
 
-**Indexes:**
-- `ix_weekly_plans_user_created` on `(user_id, created_at)` — for listing plans by creation date
+**Indexes:** `ix_weekly_plans_user_created` on `(user_id, created_at)`
 
-**Constraints:**
-- `UniqueConstraint("user_id", "week_number", name="uq_weekly_plans_user_week_number")` — enforces one plan per curriculum week per user
-- Migration `d4e5f6a7b8c9` swapped from calendar-based constraint `(user_id, year, month, week_of_month)` to curriculum-based `(user_id, week_number)`
+**Constraints:** `UniqueConstraint("user_id", "week_number", name="uq_weekly_plans_user_week_number")`
 
-**Timeline Invariant:**
-- Curriculum Week N always maps to `today + (N-1) calendar weeks`
-- Week 1 = this week (Monday-Friday), Week 2 = next week, etc.
-- Server recomputes `year`, `month`, `week_of_month`, `week_range` on every write (generate, reorder, delete)
-- Ensures chronological consistency regardless of when plans were created
+**Timeline Invariant:** Curriculum Week N = `today + (N-1) calendar weeks`. Server recomputes `year`, `month`, `week_of_month`, `week_range` on every write (generate, reorder, delete).
 
 ---
 
 ### `theme_pool`
 
-Persistent pool of pre-generated AI theme options per user. Decouples theme browsing from plan generation — themes are stored ready to serve, auto-refilled to 5 when consumed.
+Persistent pool of pre-generated AI theme options per user.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | UUID | PK, default uuid4 | Pool entry ID |
-| `user_id` | UUID | FK → users.id, CASCADE | Educator |
-| `theme_data` | JSONB | NOT NULL | Full `ThemeSchema` dict as returned by AI |
-| `is_used` | BOOLEAN | default false, NOT NULL | `True` once a plan has been generated from this theme |
+| `user_id` | UUID | FK -> users.id, CASCADE | Educator |
+| `theme_data` | JSONB | NOT NULL | Full ThemeSchema dict |
+| `is_used` | BOOLEAN | default false, NOT NULL | False = available, True = consumed |
+| `plan_id` | UUID | nullable | FK to weekly_plans.id (set when plan generated) |
 | `created_at` | TIMESTAMPTZ | server_default now() | |
 
-**Index:** `ix_theme_pool_user_active` on `(user_id, is_used)` — fast active-pool lookup
+**Index:** `ix_theme_pool_user_active` on `(user_id, is_used)`
 
-**Pool invariant:** Each user always has up to 5 rows with `is_used=False`. When a theme is consumed (`is_used=True`), the next `GET /api/theme-pool/{user_id}` auto-generates a replacement.
-
-**Migration:** `2026_03_17_b2c3d4e5f6a7_add_theme_pool_and_weekly_plan_calendar.py`
+**Pool invariant:** Each user always has up to 5 rows with `is_used=False`.
 
 ---
 
 ### `chat_history`
 
-Persistent chat messages for educator ↔ AI assistant conversations.
+Persistent chat messages for educator-AI conversations.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | UUID | PK | Message ID |
-| `user_id` | UUID | FK → users.id | |
+| `user_id` | UUID | FK -> users.id | |
 | `thread_id` | VARCHAR(255) | NOT NULL, indexed | Conversation grouping |
 | `role` | ENUM | NOT NULL | `user`, `assistant`, `system` |
 | `content` | TEXT | NOT NULL | Message body |
@@ -197,15 +187,15 @@ Persistent chat messages for educator ↔ AI assistant conversations.
 
 ### `student_embeddings`
 
-Developmental "vibes" stored as pgvector embeddings for personalization.
+Developmental profile vectors for personalization.
 
 | Column | Type | Description |
 |---|---|---|
 | `id` | UUID | PK |
-| `student_id` | UUID | FK → students.id |
+| `student_id` | UUID | FK -> students.id |
 | `domain` | VARCHAR(100) | e.g. "Sensory", "Gross Motor" |
-| `label` | VARCHAR(255) | Human-readable snapshot description |
-| `embedding` | Vector(768) | pgvector column (Vertex AI textembedding-gecko) |
+| `label` | VARCHAR(255) | Human-readable description |
+| `embedding` | Vector(768) | pgvector (Vertex AI text-embedding-004) |
 | `source_text` | TEXT | Raw text that was embedded |
 | `created_at` | TIMESTAMPTZ | |
 
@@ -213,61 +203,52 @@ Developmental "vibes" stored as pgvector embeddings for personalization.
 
 ---
 
+### `yoga_poses`
+
+Yoga pose catalog extracted from "Yoga for the Classroom" PDF. ~31 poses with GCS images and 768-dim embeddings for semantic search.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | PK, default uuid4 | |
+| `name` | VARCHAR(255) | UNIQUE, NOT NULL | Pose name |
+| `image_url` | VARCHAR(512) | NOT NULL | Public GCS URL |
+| `how_to` | JSONB | nullable | Step-by-step instructions (string array) |
+| `creative_cues` | JSONB | nullable | Kid-friendly prompts (string array) |
+| `embedding` | Vector(768) | nullable | text-embedding-004 vector |
+| `created_at` | TIMESTAMPTZ | server_default now() | |
+
+**Seeded by:** `scripts/seed_yoga_catalog.py`
+**Queried by:** `youtube_enricher.py -> _find_yoga_poses()` via cosine distance
+
+---
+
 ### `agent_reasoning_logs`
 
-Chain-of-thought audit trail for every LangGraph node invocation.
+Audit trail for pipeline completions.
 
 | Column | Type | Description |
 |---|---|---|
 | `log_id` | UUID | PK |
 | `thread_id` | VARCHAR(255) | LangGraph run ID |
-| `agent_name` | VARCHAR(100) | architect, auditor, personalizer, save |
-| `internal_monologue` | TEXT | Full reasoning trace |
-| `tools_used` | JSONB | `[{tool, input, output}]` |
-| `input_summary` | TEXT | What the agent received |
-| `output_summary` | TEXT | What the agent produced |
+| `agent_name` | VARCHAR(100) | Node name (e.g. "save") |
+| `internal_monologue` | TEXT | Completion summary |
+| `tools_used` | JSONB | Tool invocations |
+| `input_summary` | TEXT | What the node received |
+| `output_summary` | TEXT | What the node produced |
 | `duration_ms` | INTEGER | Wall-clock time |
 | `timestamp` | TIMESTAMPTZ | |
-
-**Index:** `ix_agent_logs_thread_ts` on `(thread_id, timestamp)`
 
 ---
 
 ### `agent_checkpoints`
 
-LangGraph state snapshots for resume-on-failure (not yet implemented).
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | UUID | PK |
-| `thread_id` | VARCHAR(255) | LangGraph thread |
-| `checkpoint_ns` | VARCHAR(255) | Sub-graph namespace |
-| `parent_checkpoint_id` | VARCHAR(255) | For branching |
-| `state` | JSONB | Full serialized LangGraph state |
-| `metadata` | JSONB | Step count, node name |
-| `created_at` | TIMESTAMPTZ | |
-
-**Index:** `ix_checkpoints_thread_ns` on `(thread_id, checkpoint_ns)`
+LangGraph state snapshots (reserved for future resume-on-failure).
 
 ---
 
 ### `critique_history`
 
-Architect ↔ Auditor debate records. One row per critique round.
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | UUID | PK |
-| `thread_id` | VARCHAR(255) | Pipeline run ID |
-| `round_number` | INTEGER | 1 = first pass, 2 = revision, ... |
-| `architect_proposal` | TEXT | Draft plan JSON |
-| `auditor_feedback` | TEXT | Critique text |
-| `resolution` | TEXT | Final merged plan JSON |
-| `accepted` | BOOLEAN | Did auditor accept? |
-| `scores` | JSONB | `{safety, developmental_fit, creativity}` |
-| `created_at` | TIMESTAMPTZ | |
-
-**Index:** `ix_critique_thread_round` on `(thread_id, round_number)`
+Legacy table from the removed Auditor node. Not actively populated by the current pipeline.
 
 ---
 
@@ -282,86 +263,47 @@ Chunked pedagogy PDFs for RAG pipeline (not yet populated with real data).
 | `chunk_index` | INTEGER | Position within source |
 | `content` | TEXT | Raw chunk text |
 | `embedding` | Vector(768) | pgvector column |
-| `token_count` | INTEGER | Tokens in this chunk |
+| `token_count` | INTEGER | |
 | `metadata` | JSONB | Page number, section, etc. |
-| `created_at` | TIMESTAMPTZ | |
-
-**Index:** `ix_curriculum_source_chunk` on `(source_document, chunk_index)`
-
----
-
-### `yoga_poses`
-
-Yoga pose catalog extracted from the "Yoga for the Classroom" PDF. Each pose has an image in GCS and a 768-dim embedding for semantic search.
-
-| Column | Type | Constraints | Description |
-|---|---|---|---|
-| `id` | UUID | PK, default uuid4 | Pose ID |
-| `name` | VARCHAR(255) | UNIQUE, NOT NULL | Pose name (e.g. "Cat /Cow") |
-| `image_url` | VARCHAR(512) | NOT NULL | Public GCS URL to pose photo |
-| `how_to` | JSONB | nullable | Step-by-step instructions as string array |
-| `creative_cues` | JSONB | nullable | Kid-friendly prompts as string array |
-| `embedding` | Vector(768) | nullable | Gemini text-embedding-004 vector |
-| `created_at` | TIMESTAMPTZ | server_default now() | |
-
-**Seeded by:** `scripts/seed_yoga_catalog.py` (~30 poses)
-**Queried by:** `youtube_enricher.py → _find_yoga_poses()` via cosine distance
-**Migration:** `2026_03_13_e375332db6a6_add_yoga_poses_table.py`
 
 ---
 
 ## Migrations (Alembic)
 
-- Config: `alembic.ini` (no credentials — loaded from `.env`)
-- Async runner: `alembic/env.py` uses `async_engine_from_config` + `asyncio.run()`
-- Template: `script.py.mako` pre-imports `pgvector.sqlalchemy.Vector`
-- Initial migration: `2026_03_09_5f368ee0298a_initial_schema_with_pgvector.py`
-
-### Migration History (key milestones)
-
-| Migration ID | Description |
-|---|---|
-| `5f368ee0298a` | Initial schema — all core tables + pgvector |
-| `023b423663bf` | Unique constraint on `(user_id, week_number)` for weekly_plans |
-| `f8a2b1c3d4e5` | Composite index on `students(user_id, is_active)` |
-| `e375332db6a6` | Add `yoga_poses` table |
-| `c3d4e5f6a7b8` | Add `pdf_url` column to `weekly_plans` |
-| `d4e5f6a7b8c9` | Swap unique constraint to `(user_id, week_number)`; add `year`, `month`, `week_of_month` columns |
-| `b2c3d4e5f6a7` | Add `theme_pool` table + calendar columns to `weekly_plans` |
-
 ```bash
-# Apply migrations
 cd backend
-alembic upgrade head
-
-# Generate new migration after model changes
-alembic revision --autogenerate -m "description"
+alembic upgrade head                          # Apply all migrations
+alembic revision --autogenerate -m "message"  # Create new migration
+alembic downgrade -1                          # Rollback one step
 ```
+
+- Config: `alembic.ini` (credentials loaded from `.env`)
+- Async runner: `alembic/env.py` uses `async_engine_from_config`
+- Template: `script.py.mako` pre-imports `pgvector.sqlalchemy.Vector`
 
 ---
 
 ## Seed Data
 
-### `scripts/seed_db.py` — Mock Users & Students
+### `scripts/seed_db.py`
 
-Inserts mock data for development:
-- **1 User:** Sarah Thompson (Little Sprouts Learning Center)
-- **4 Students:** Emma (21mo), Liam (30mo), Sophia (13mo), Noah (25mo)
-- **8 Embeddings:** 2 per student (Sensory + Gross Motor domains, random 768-dim vectors)
+Inserts deterministic mock data:
+- **1 User:** Sarah Thompson (ID: `83b58b5f-698b-4ae1-9529-f83d97641f01` -- matches frontend `DEFAULT_USER_ID`)
+- **4 Students:** Emma (21mo), Liam (30mo), Sophia (15mo), Noah (13mo)
+- **8 Embeddings:** 2 per student (Sensory + Gross Motor, deterministic 768-dim vectors)
 
-Idempotent — checks for existing data before inserting.
+Idempotent -- skips if Sarah already exists.
 
-### `scripts/seed_yoga_catalog.py` — Yoga Pose Catalog (Phase 2)
+### `scripts/seed_yoga_catalog.py`
 
-Seeds ~30 yoga poses from the "Yoga for the Classroom" PDF:
-1. Parses raw page text with Gemini → `{name, how_to, creative_cues}`
+Seeds ~31 yoga poses from the "Yoga for the Classroom" PDF:
+1. Parses raw page text with Gemini -> `{name, how_to, creative_cues}`
 2. Matches image file in `data_prep/images/`
-3. Uploads image to GCS (`yoga/` folder) with `make_public()`
+3. Uploads image to GCS (`yoga/` folder)
 4. Generates 768-dim embedding via `text-embedding-004`
 5. Upserts row into `yoga_poses` table
 
-**Prerequisite:** Run `extract_pdf_raw.py` first to generate `data_prep/raw_text.json` and `data_prep/images/`.
-Idempotent — skips poses that already exist by name.
+Idempotent -- skips poses that already exist by name.
 
 ---
 
@@ -369,12 +311,10 @@ Idempotent — skips poses that already exist by name.
 
 | Constant | Value | Location | Description |
 |---|---|---|---|
-| `EMBEDDING_DIM` | 768 | `models.py` | Vertex AI textembedding-gecko output dimension |
-
-If switching to a different embedding model (e.g. OpenAI 1536-dim), update this constant and generate a new Alembic migration.
+| `EMBEDDING_DIM` | 768 | `models.py` | Vertex AI text-embedding-004 output dimension |
 
 ---
 
 ## JSONB Strategy
 
-Rich nested data (activities, circle_time, palette, objectives, newsletter) is stored as JSONB rather than normalized tables. This keeps the schema manageable and matches how the frontend consumes the data as nested objects. Can be normalized later if query patterns demand it.
+Rich nested data (activities, circle_time, palette, objectives, newsletter) is stored as JSONB rather than normalized tables. This keeps the schema manageable and matches how the frontend consumes the data as nested objects.

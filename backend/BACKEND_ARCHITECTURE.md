@@ -1,8 +1,8 @@
-# Backend Architecture - Complete Documentation
+# Backend Architecture
 
 ## Overview
 
-The **Early Nurturer Planner Backend** is a FastAPI application powered by a LangGraph multi-agent AI pipeline that generates safety-audited, personalized weekly curriculum plans for infant/toddler classrooms (ages 0–36 months). It uses Google Vertex AI (Gemini 2.5 Flash) for structured content generation, PostgreSQL with pgvector for persistence and embeddings, and the YouTube Data API for enriching plans with real video content.
+The **Early Nurturer Planner Backend** is a FastAPI application powered by a LangGraph AI pipeline that generates personalized weekly curriculum plans for infant/toddler classrooms (ages 0-36 months). It uses Google Vertex AI (Gemini 2.5 Flash) for structured content generation, Supabase (PostgreSQL + pgvector) for persistence and embeddings, and the YouTube Data API for enriching plans with real video content.
 
 ---
 
@@ -12,10 +12,10 @@ The **Early Nurturer Planner Backend** is a FastAPI application powered by a Lan
 |---|---|---|
 | **Framework** | FastAPI | Async REST API |
 | **AI Engine** | Gemini 2.5 Flash (Vertex AI) | Structured curriculum generation |
-| **Orchestration** | LangGraph | Multi-agent pipeline with conditional routing |
-| **Database** | PostgreSQL + asyncpg | Async relational storage |
-| **Vectors** | pgvector | Developmental embeddings & RAG |
-| **Background Tasks** | Google Cloud Tasks | Scalable, reliable background job enqueuing |
+| **Orchestration** | LangGraph | Multi-node pipeline with parallel fan-out |
+| **Database** | Supabase (PostgreSQL) + asyncpg | Async relational storage |
+| **Vectors** | pgvector | Developmental embeddings & yoga pose search |
+| **Background Tasks** | Google Cloud Tasks | Scalable background job enqueuing |
 | **ORM** | SQLAlchemy 2.0 (async) | Database models & queries |
 | **Migrations** | Alembic | Schema versioning |
 | **Config** | pydantic-settings | Type-safe .env loading |
@@ -31,281 +31,144 @@ backend/
 ├── main.py                          # FastAPI app entry point
 ├── config.py                        # Settings from .env (pydantic-settings)
 ├── Dockerfile                       # Cloud Run container image
-├── .dockerignore                    # Excludes .env, venv, SA keys
-├── requirements.txt                 # Python dependencies
+├── .dockerignore
+├── requirements.txt
 ├── alembic.ini                      # Alembic config (no credentials)
-├── dev-log.md                       # Development journal (phases 1–8)
 │
 ├── app/
 │   ├── __init__.py
 │   │
-│   ├── api/                         # ── FastAPI Routers ──
+│   ├── api/                         # -- FastAPI Routers --
 │   │   ├── __init__.py
 │   │   └── routers/
 │   │       ├── __init__.py
 │   │       ├── themes.py            # POST /api/themes/generate (legacy)
-│   │       ├── theme_pool.py        # GET /api/theme-pool/{user_id} (read-only), POST /refresh
-│   │       ├── worker.py            # POST /internal/worker/generate-themes (Cloud Tasks worker)
+│   │       ├── theme_pool.py        # GET /api/theme-pool/{user_id}, POST /refresh
+│   │       ├── worker.py            # POST /internal/worker/generate-themes (Cloud Tasks)
 │   │       └── planner.py           # Plan generation, CRUD, PDF, reorder, delete
 │   │
-│   ├── agents/                      # ── LangGraph AI Pipeline ──
+│   ├── agents/                      # -- LangGraph AI Pipeline --
 │   │   ├── __init__.py
 │   │   ├── state.py                 # PlannerState TypedDict
 │   │   ├── schemas.py               # Pydantic models for Gemini structured output
 │   │   ├── tools.py                 # Agent tools (DB queries, Gemini calls, YouTube)
-│   │   ├── architect.py             # Curriculum Architect node
-│   │   ├── auditor.py               # Safety Auditor node
-│   │   ├── personalizer.py          # Personalizer node
-│   │   ├── youtube_enricher.py      # YouTube video enrichment node
-│   │   └── graph.py                 # Graph wiring, save node, routing logic
+│   │   ├── architect.py             # Master Architect + Day Architect (2-stage split)
+│   │   ├── youtube_enricher.py      # YouTube songs + yoga pose vector search
+│   │   └── graph.py                 # Graph wiring, parallel fan-out, save node
 │   │
-│   ├── services/                    # ── Business Logic Services ──
+│   ├── services/                    # -- Business Logic Services --
 │   │   ├── pdf_service.py           # WeasyPrint PDF generation + GCS upload/cache
 │   │   ├── image_service.py         # Vertex AI cover image generation + GCS
+│   │   ├── material_service.py      # Material poster generation
 │   │   └── task_service.py          # Google Cloud Tasks enqueuing + local fallback
 │   │
-│   └── db/                          # ── Database Layer ──
+│   └── db/                          # -- Database Layer --
 │       ├── __init__.py
 │       ├── database.py              # Async engine, session factory, Base
 │       └── models.py                # All SQLAlchemy ORM models
 │
-├── alembic/                         # ── Migrations ──
+├── alembic/                         # -- Migrations --
 │   ├── env.py                       # Async migration runner
-│   ├── script.py.mako               # Template (imports pgvector)
-│   └── versions/                    # Migration files
+│   ├── script.py.mako
+│   └── versions/
 │
-└── scripts/                         # ── Dev Utilities ──
-    ├── gcp-phase1-setup.sh          # GCP provisioning (Cloud SQL, SA keys)
+└── scripts/                         # -- Dev Utilities --
     ├── seed_db.py                   # Insert mock users/students/embeddings
-    ├── seed_yoga_catalog.py         # Seed yoga pose catalog from PDF + GCS
-    └── update-db-ip.sh              # Whitelist current IP on Cloud SQL
+    └── seed_yoga_catalog.py         # Seed yoga pose catalog from PDF + GCS
 ```
 
 ---
 
 ## Configuration (`config.py`)
 
-Settings are loaded from `backend/.env` via `pydantic-settings`. The `Settings` class validates all values at startup.
+Settings are loaded from `backend/.env` via `pydantic-settings`.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `DATABASE_URL` | ✅ | — | `postgresql+asyncpg://user:pass@host:port/db` |
-| `GCP_PROJECT_ID` | ❌ | `early-nurturer-planner` | Google Cloud project |
-| `GCS_BUCKET_NAME` | ❌ | `early-nurturer-planner-assets` | Cloud Storage bucket |
-| `GOOGLE_APPLICATION_CREDENTIALS` | ❌ | `None` | SA key path (optional on Cloud Run) |
-| `VERTEX_AI_LOCATION` | ❌ | `us-central1` | Vertex AI region |
-| `YOUTUBE_API_KEY` | ❌ | `""` | YouTube Data API v3 key |
-| `WORKER_API_KEY` | ✅ | — | Shared secret for internal worker authentication |
-| `CLOUD_TASKS_QUEUE` | ❌ | `theme-generation` | Google Cloud Tasks queue name |
-| `CLOUD_RUN_URL` | ❌ | `""` | Base URL of the deployed Cloud Run service |
+| `DATABASE_URL` | Yes | -- | `postgresql+asyncpg://user:pass@host:port/db` (Supabase) |
+| `GCP_PROJECT_ID` | No | `early-nurturer-planner` | Google Cloud project |
+| `GCS_BUCKET_NAME` | No | `early-nurturer-planner-assets` | Cloud Storage bucket |
+| `GOOGLE_APPLICATION_CREDENTIALS` | No | `None` | SA key path (not needed on Cloud Run) |
+| `VERTEX_AI_LOCATION` | No | `us-central1` | Vertex AI region |
+| `YOUTUBE_API_KEY` | No | `""` | YouTube Data API v3 key |
+| `WORKER_API_KEY` | Yes | -- | Shared secret for internal worker auth |
+| `CLOUD_TASKS_QUEUE` | No | `theme-generation` | Google Cloud Tasks queue name |
+| `CLOUD_RUN_URL` | No | `""` | Cloud Run service URL (empty = local mode) |
 
-### Validators
-- `GOOGLE_APPLICATION_CREDENTIALS` — if provided, verifies the file exists on disk. `None` is allowed (Cloud Run uses built-in SA identity).
-- `DATABASE_URL` — must start with `postgresql+asyncpg://`, `postgresql://`, or `postgres://`.
+---
+
+## LangGraph Pipeline
+
+```
+START --> fetch_context --> master_architect --> parallel_generate --> assemble_plan --> save --> END
+                                                     |
+                                              asyncio.gather:
+                                              1. generate_days (5 daily plans)
+                                              2. enrich_circle_time (YouTube + yoga)
+```
+
+See `AGENTIC_PIPELINE_SYSTEM.md` for full pipeline documentation.
 
 ---
 
 ## API Endpoints
 
-### `GET /api/theme-pool/{user_id}`
-**Router:** `app/api/routers/theme_pool.py`
+### Theme Pool
 
-Returns the user's active theme pool (up to 5). This endpoint is **strictly read-only** and does not trigger background generation. It returns a `generating` flag (boolean) based on whether the current count is less than 5.
+**`GET /api/theme-pool/{user_id}`** -- Returns the user's active theme pool (up to 5 unused themes). Strictly read-only; returns a `generating` flag when pool is incomplete.
 
-**Response:**
-```json
-{
-  "themes": [ { "id": "...", "theme_data": {...} }, ... ],
-  "generating": true,
-  "pool_size": 5
-}
-```
+**`POST /api/theme-pool/{user_id}/refresh`** -- Discards non-kept themes and generates replacements ("Shuffle" button). Body: `{ "keep_ids": ["uuid", ...] }`
 
----
+**`POST /internal/worker/generate-themes`** -- Cloud Tasks callback for background theme generation. Requires `X-Worker-Key` header.
 
-### `POST /internal/worker/generate-themes`
-**Router:** `app/api/routers/worker.py`
+### Plan Generation
 
-Internal worker endpoint triggered by Google Cloud Tasks. Generates missing themes for a specific user to refill their pool.
-
-**Security:** Requires `X-Worker-Key` header matching `WORKER_API_KEY`.
-
-**Request:** `{ "user_id": "uuid" }`
-
----
-
-### `POST /api/theme-pool/{user_id}/refresh`
-**Router:** `app/api/routers/theme_pool.py`
-
-Discards non-kept themes and generates replacements ("Shuffle" button).
-
-**Request:** `{ "keep_ids": ["uuid", ...] }`
-
-**Flow:**
-1. Marks all themes NOT in `keep_ids` as `is_used=True`
-2. Generates new themes to bring pool back to 5
-3. Returns updated pool
-
----
-
-### `POST /api/themes/generate`
-**Router:** `app/api/routers/themes.py` *(legacy — use theme-pool instead)*
-
-Generates AI-powered theme options on-demand without pool persistence.
-
-**Request:** `{ "user_id": "...", "theme_count": 5 }`
-
-**Response:** Array of `ThemeSchema` objects.
-
----
-
-### `POST /api/planner/generate`
-**Router:** `app/api/routers/planner.py`
-
-Triggers the full multi-agent LangGraph pipeline.
-
-**Request:**
+**`POST /api/planner/generate`** -- Triggers the full LangGraph pipeline. Marks the chosen theme pool entry as used.
 ```json
 {
   "user_id": "83b58b5f-...",
   "selected_theme": { "name": "Fox Forest", ... },
-  "theme_pool_id": "uuid-of-pool-entry"  // optional — marks pool theme as used
+  "theme_pool_id": "uuid-of-pool-entry"
 }
 ```
 
-**Flow:**
-1. Counts existing user plans → `week_number = count + 1`
-2. Computes `week_range`, `year`, `month`, `week_of_month` from `today + (week_number - 1) weeks`
-3. Marks `theme_pool_id` as `is_used=True` (if provided)
-4. Compiles and invokes LangGraph: `fetch_context → architect → auditor → (1 revision max) → personalizer → youtube_enricher → save`
-5. Returns `personalized_plan` or falls back to `draft_plan`
+Pipeline: `fetch_context -> master_architect -> parallel_generate -> assemble_plan -> save`
 
-**Response:**
-```json
-{
-  "status": "success",
-  "plan": { /* WeekPlanSchema */ },
-  "plan_id": "uuid"
-}
-```
+Response: `{ "status": "success", "plan": { ... }, "plan_id": "uuid" }`
 
----
+### Plan CRUD
 
-### `GET /api/planner/{user_id}/plan/{plan_id}`
-**Router:** `app/api/routers/planner.py`
+**`GET /api/planner/{user_id}/plans`** -- List all saved plans, ordered by creation date descending.
 
-Fetch a full plan by UUID. Returns all fields including `daily_plans` (activities grouped by day via `_rebuild_daily_plans()`), `cover_image_url`, and `pdf_url`.
+**`GET /api/planner/{user_id}/plan/{plan_id}`** -- Fetch a full plan by UUID (includes rebuilt `daily_plans`, `cover_image_url`, `pdf_url`).
 
----
+**`DELETE /api/planner/{user_id}/plan/{plan_id}`** -- Delete a plan and renumber remaining plans sequentially with date recomputation.
 
-### `GET /api/planner/{user_id}/plans`
-**Router:** `app/api/routers/planner.py`
+**`PATCH /api/planner/{user_id}/plans/reorder`** -- Reorder plans to match client-supplied sequence. Two-phase update to avoid unique constraint violations. Recomputes all calendar fields.
 
-Lists all saved weekly plans for a user, ordered by creation date descending.
+### PDF
 
-**Response:**
-```json
-[
-  {
-    "id": "uuid",
-    "global_week_number": 1,
-    "week_of_month": 3,
-    "month": 3,
-    "year": 2026,
-    "theme": "Fox Forest",
-    "theme_emoji": "🦊",
-    "week_range": "3/17 - 3/21",
-    "palette": {...},
-    "domains": ["Fine Motor", "Language"],
-    "pdf_url": "https://storage.googleapis.com/...",
-    "created_at": "2026-03-17T12:00:00Z"
-  }
-]
-```
+**`GET /api/planner/{user_id}/plan/{plan_id}/pdf`** -- Download PDF (GCS-cached). Generates on first request, proxies from GCS on subsequent requests.
 
----
+**`POST /api/planner/{user_id}/plan/{plan_id}/pdf/regenerate`** -- Force-regenerate PDF (deletes GCS blob, rebuilds with fresh cover image).
 
-### `PATCH /api/planner/{user_id}/plans/reorder`
-**Router:** `app/api/routers/planner.py`
+**`GET /api/planner/{user_id}/week/{week_number}/pdf`** -- Legacy per-week PDF (no caching).
 
-Reorders plans to match the client-supplied sequence of plan IDs. Server recomputes all date fields to maintain the timeline invariant (Curriculum Week N = today + (N-1) calendar weeks).
+### Materials
 
-**Request:**
-```json
-[
-  {"plan_id": "uuid-3"},
-  {"plan_id": "uuid-1"},
-  {"plan_id": "uuid-2"}
-]
-```
+**`GET /api/planner/{user_id}/plan/{plan_id}/materials/{material_type}`** -- Download a material poster (letter, color, shape, counting, yoga) as PDF.
 
-**Flow:**
-1. Validates all plan IDs belong to the user
-2. Two-phase update to avoid unique constraint violations:
-   - Phase 1: Set `week_number` to temporary negative values
-   - Phase 2: Assign sequential `week_number = 1, 2, 3...` based on position
-3. Recomputes `year`, `month`, `week_of_month`, `week_range` via `_compute_week_info(today + (N-1) weeks)`
+**`POST /api/planner/{user_id}/plan/{plan_id}/materials/bulk-export`** -- Bulk export multiple material types as a single combined PDF.
 
-**Response:** Updated list of plans ordered by `week_number` ascending.
+### Other
 
----
+**`POST /api/planner/{user_id}/plan/{plan_id}/circle-time/songs`** -- Update greeting/goodbye songs on a saved plan.
 
-### `GET /api/planner/{user_id}/plan/{plan_id}/pdf`
-**Router:** `app/api/routers/planner.py`
+**`GET /api/planner/{user_id}/plan/{plan_id}/youtube-search`** -- Search YouTube for replacement songs.
 
-Primary PDF download endpoint with GCS caching.
+**`POST /api/themes/generate`** -- Legacy on-demand theme generation (use theme-pool instead).
 
-**Flow:**
-- If `pdf_url` cached: proxies GCS content through backend (avoids CORS on direct GCS access)
-- If not cached: generates via WeasyPrint, uploads to GCS at `weekly-plans/{plan_id}.pdf`, saves URL to DB, streams bytes
-- Falls through to regeneration if the GCS fetch fails
-
-**Response:** `StreamingResponse` with `Content-Disposition: attachment`
-
----
-
-### `POST /api/planner/{user_id}/plan/{plan_id}/pdf/regenerate`
-**Router:** `app/api/routers/planner.py`
-
-Force-regenerates the PDF (bypasses cache).
-
-**Flow:**
-1. Deletes existing GCS blob (if any)
-2. Regenerates PDF with current plan data + fresh cover image
-3. Uploads to GCS, updates `pdf_url` in DB
-4. Streams new PDF bytes
-
----
-
-### `GET /api/planner/{user_id}/week/{week_number}/pdf`
-**Router:** `app/api/routers/planner.py` *(legacy — no caching)*
-
-Generates a PDF on-the-fly by week number. No GCS upload or `pdf_url` caching. Kept for backward compatibility.
-
----
-
-### `DELETE /api/planner/{user_id}/plan/{plan_id}`
-**Router:** `app/api/routers/planner.py`
-
-Deletes a plan and renumbers all remaining plans sequentially (1, 2, 3...). Recomputes calendar data for each remaining plan.
-
-**Flow:**
-1. Deletes the specified plan
-2. Fetches remaining plans ordered by `week_number`
-3. Two-phase renumbering with date recomputation (same logic as reorder)
-
-**Response:**
-```json
-{
-  "deleted": "uuid",
-  "remaining_count": 2
-}
-```
-
----
-
-### `GET /health`
-Simple liveness probe. Returns `{"status": "ok"}`.
+**`GET /health`** -- Liveness probe.
 
 ---
 
@@ -317,14 +180,11 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Set up .env with DATABASE_URL, GCP credentials, etc.
-# Run migrations
+# Set up .env with DATABASE_URL (Supabase), GCP credentials, etc.
 alembic upgrade head
-
-# Seed mock data
 python scripts/seed_db.py
+python scripts/seed_yoga_catalog.py
 
-# Start server
 uvicorn main:app --reload --port 8000
 ```
 
@@ -336,19 +196,4 @@ uvicorn main:app --reload --port 8000
 ./scripts/deploy-backend.sh
 ```
 
-Or manually:
-```bash
-gcloud run deploy early-nurturer-api \
-  --source ./backend \
-  --project early-nurturer-planner \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --add-cloudsql-instances early-nurturer-planner:us-central1:nurture-postgres \
-  --set-env-vars '...' \
-  --memory 1Gi --timeout 300 --port 8080
-```
-
-**Key details:**
-- Cloud Run connects to Cloud SQL via Unix socket (`/cloudsql/...`), not direct IP
-- `GOOGLE_APPLICATION_CREDENTIALS` is not needed — Cloud Run uses its built-in SA
-- Dockerfile uses `python:3.12-slim`, exposes port 8080
+The script reads `DATABASE_URL` and secrets from `backend/.env`, then runs `gcloud run deploy` with all env vars. Cloud Run connects directly to Supabase over the internet (no Cloud SQL proxy needed).
