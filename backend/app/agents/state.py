@@ -2,8 +2,8 @@
 LangGraph graph state definition.
 
 PlannerState is the TypedDict that flows between every node in the
-Architect → Auditor → Personalizer pipeline. Each node reads what it
-needs and returns a partial dict of updates.
+fetch_context → master_architect → parallel_generate → assemble_plan → save
+pipeline. Each node reads what it needs and returns a partial dict of updates.
 """
 
 from typing import TypedDict
@@ -39,14 +39,8 @@ class PlannerState(TypedDict, total=False):
     daily_plans_raw: list[dict] | None # 5 DailyPlanSchema dicts from day architect
     enriched_circle_time: dict | None  # circle_time dict after YouTube/yoga enrichment
 
-    # ── Auditor output ────────────────────────────────────────
-    audit_result: dict | None     # AuditResultSchema serialised as dict
-
-    # ── Personalizer output ───────────────────────────────────
-    personalized_plan: dict | None
-
     # ── Control flow ──────────────────────────────────────────
-    iteration_count: int          # incremented each Architect pass (max 3)
+    iteration_count: int          # set to 1 by master_architect
     error: str | None             # set on Gemini / DB failures
 
     # ── Save output ─────────────────────────────────────────

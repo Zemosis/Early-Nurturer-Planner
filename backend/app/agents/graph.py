@@ -1,19 +1,16 @@
 """
-LangGraph pipeline — Curriculum Planner Graph (Phase 3: 2-Way Split).
+LangGraph pipeline — Curriculum Planner Graph.
 
 Graph topology:
     START → fetch_context → master_architect → parallel_generate → assemble_plan → save → END
 
 The parallel_generate node runs two coroutines concurrently via asyncio.gather:
-  1. generate_days   — all 5 daily plans with personalization baked in
+  1. generate_days      — all 5 daily plans with personalization baked in
   2. enrich_circle_time — YouTube songs + DB yoga poses on the skeleton's circle_time
-
-The auditor and personalizer nodes are bypassed (safety enforced via system prompts).
 """
 
 import asyncio
 import copy
-import json
 import logging
 import uuid
 
@@ -28,7 +25,7 @@ from app.agents.schemas import WeekPlanSchema
 from app.agents.state import PlannerState
 from app.agents.tools import fetch_student_context, query_pedagogy
 from app.db.database import async_session_factory
-from app.db.models import AgentReasoningLog, CritiqueHistory, WeeklyPlan
+from app.db.models import AgentReasoningLog, WeeklyPlan
 
 logger = logging.getLogger(__name__)
 
@@ -85,16 +82,13 @@ async def fetch_context_node(state: PlannerState) -> dict:
 
 
 async def save_plan_node(state: PlannerState) -> dict:
-    """Persist the final plan, critique history, and reasoning log to Postgres.
+    """Persist the assembled plan and reasoning log to Postgres.
 
-    - Saves personalized_plan → weekly_plans table (upsert on year/month/week_of_month)
-    - Saves audit_result → critique_history table
+    - Saves draft_plan → weekly_plans table (upsert on year/month/week_of_month)
     - Logs pipeline completion → agent_reasoning_logs table
     - Returns saved_plan_id so the API can pass it to the frontend
     """
-    personalized_plan = state.get("personalized_plan")
     draft_plan = state.get("draft_plan")
-    audit_result = state.get("audit_result")
     user_id_str = state.get("user_id", "")
     thread_id = state.get("thread_id", str(uuid.uuid4()))
     iteration_count = state.get("iteration_count", 0)
@@ -104,12 +98,10 @@ async def save_plan_node(state: PlannerState) -> dict:
     month = state.get("month", 1)
     week_of_month = state.get("week_of_month", 1)
 
-    # Use personalized_plan if available, fall back to draft_plan
-    final_plan = personalized_plan or draft_plan
+    final_plan = draft_plan
 
-    logger.info("save_plan_node: personalized=%s, draft=%s, user=%s, year=%s, month=%s, wom=%s",
-                personalized_plan is not None, draft_plan is not None,
-                user_id_str, year, month, week_of_month)
+    logger.info("save_plan_node: draft=%s, user=%s, year=%s, month=%s, wom=%s",
+                draft_plan is not None, user_id_str, year, month, week_of_month)
 
     if not final_plan:
         logger.warning("Save: no plan available (personalized=%s, draft=%s)",
@@ -181,32 +173,15 @@ async def save_plan_node(state: PlannerState) -> dict:
             )
             saved_id = row.scalar()
 
-            # ── 2. Save critique history ──────────────────────
-            if audit_result:
-                critique_row = CritiqueHistory(
-                    thread_id=thread_id,
-                    round_number=iteration_count,
-                    architect_proposal=json.dumps(draft_plan) if draft_plan else "{}",
-                    auditor_feedback=audit_result.get("critique", ""),
-                    resolution=json.dumps(final_plan),
-                    accepted=audit_result.get("accepted", False),
-                    scores=audit_result.get("scores"),
-                )
-                session.add(critique_row)
-
-            # ── 3. Log pipeline completion ────────────────────
+            # ── 2. Log pipeline completion ────────────────────
             reasoning_log = AgentReasoningLog(
                 thread_id=thread_id,
                 agent_name="save",
                 internal_monologue=(
-                    f"Pipeline completed after {iteration_count} architect "
-                    f"iteration(s). Plan accepted: "
-                    f"{audit_result.get('accepted', False) if audit_result else 'N/A'}. "
-                    f"Personalized: {personalized_plan is not None}."
+                    f"Pipeline completed after {iteration_count} architect iteration(s)."
                 ),
                 input_summary=f"thread={thread_id}, user={user_id_str}",
-                output_summary=f"Saved week {week_num} "
-                               f"plan for theme '{final_plan.get('theme')}'.",
+                output_summary=f"Saved week {week_num} plan for theme '{final_plan.get('theme')}'.",
             )
             session.add(reasoning_log)
 
