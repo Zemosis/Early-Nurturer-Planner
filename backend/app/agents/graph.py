@@ -104,8 +104,7 @@ async def save_plan_node(state: PlannerState) -> dict:
                 draft_plan is not None, user_id_str, year, month, week_of_month)
 
     if not final_plan:
-        logger.warning("Save: no plan available (personalized=%s, draft=%s)",
-                       personalized_plan is not None, draft_plan is not None)
+        logger.warning("Save: no draft_plan available")
         return {"error": "No plan available to save."}
 
     try:

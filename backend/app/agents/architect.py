@@ -35,14 +35,29 @@ gemini_client = genai.Client(
 
 GEMINI_MODEL = "gemini-2.5-flash"
 
-# Matches lone Unicode surrogate escapes (\uD800–\uDFFF) that Gemini
-# sometimes emits and that break strict JSON parsers.
-_SURROGATE_RE = re.compile(r'\\u[dD][89a-fA-F][0-9a-fA-F]{2}')
+# Matches a valid JSON surrogate pair: high surrogate (\uD800–\uDBFF)
+# followed immediately by a low surrogate (\uDC00–\uDFFF).
+_SURROGATE_PAIR_RE = re.compile(
+    r'\\u([dD][89abAB][0-9a-fA-F]{2})\\u([dD][cdefCDEF][0-9a-fA-F]{2})'
+)
+# Matches any remaining lone surrogate escape (\uD800–\uDFFF).
+_LONE_SURROGATE_RE = re.compile(r'\\u[dD][89a-fA-F][0-9a-fA-F]{2}')
+
+
+def _decode_surrogate_pair(match: re.Match) -> str:
+    """Convert a JSON surrogate pair to the actual Unicode character."""
+    high = int(match.group(1), 16)
+    low = int(match.group(2), 16)
+    code_point = 0x10000 + (high - 0xD800) * 0x400 + (low - 0xDC00)
+    return chr(code_point)
 
 
 def _sanitize_and_extract_json(raw_text: str) -> str:
-    """Strip surrogate escapes and extract JSON from optional markdown fences."""
-    raw_text = _SURROGATE_RE.sub('', raw_text)
+    """Fix surrogate pairs, strip lone surrogates, extract JSON from markdown fences."""
+    # First, convert valid surrogate pairs (e.g. \uD83D\uDC20 → 🐠)
+    raw_text = _SURROGATE_PAIR_RE.sub(_decode_surrogate_pair, raw_text)
+    # Then strip any remaining lone surrogates that would break JSON parsers
+    raw_text = _LONE_SURROGATE_RE.sub('', raw_text)
     json_match = re.search(r'```(?:json)?\s*([\s\S]+?)\s*```', raw_text)
     if json_match:
         raw_text = json_match.group(1)

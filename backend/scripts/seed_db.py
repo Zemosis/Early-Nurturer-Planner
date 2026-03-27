@@ -13,6 +13,7 @@ Usage:
 
 import asyncio
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from app.db.models import EMBEDDING_DIM, Student, StudentEmbedding, User
 # ── Mock data ─────────────────────────────────────────────────
 
 SEED_USER = {
+    "id": uuid.UUID("83b58b5f-698b-4ae1-9529-f83d97641f01"),
     "email": "sarah@littlesprouts.edu",
     "full_name": "Sarah Thompson",
     "daycare_name": "Little Sprouts Learning Center",
