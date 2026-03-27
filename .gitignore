@@ -37,3 +37,7 @@ npm-debug.log*
 backend/data_prep/
 samples/
 temp_pdfs/
+
+# Claude
+CLAUDE.md
+
