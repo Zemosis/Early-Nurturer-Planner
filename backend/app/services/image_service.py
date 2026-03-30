@@ -36,7 +36,8 @@ def _build_prompt(theme: str) -> str:
     return (
         f"A beautiful, soft watercolor illustration for a preschool "
         f"classroom theme about {theme}. Pastel colors, child-friendly, "
-        f"no text, clean white background."
+        f"clean white background. "
+        f"ABSOLUTELY NO TEXT, NO LETTERS, NO WORDS, NO NUMBERS, AND NO WATERMARKS IN THE IMAGE."
     )
 
 
@@ -96,6 +97,7 @@ async def get_or_generate_cover_image(plan_row: WeeklyPlan) -> str | None:
                 number_of_images=1,
                 aspect_ratio="4:3",
                 person_generation="dont_allow",
+                negative_prompt="text, words, letters, numbers, watermarks, signatures, labels, captions, titles",
             ),
         )
     except Exception as e:
@@ -149,7 +151,8 @@ async def get_or_generate_daily_image(
         f"A beautiful, tall portrait watercolor illustration for a preschool "
         f"classroom activity on {day_name}, themed around {theme}. "
         f"Focus: {day_summary}. Soft pastel colors, child-friendly, "
-        f"no text, clean background, suitable for 0-3 year olds."
+        f"clean background, suitable for 0-3 year olds. "
+        f"ABSOLUTELY NO TEXT, NO LETTERS, NO WORDS, NO NUMBERS, AND NO WATERMARKS IN THE IMAGE."
     )
     logger.info("Generating daily image for %s (%s)...", day_name, theme)
 
@@ -159,8 +162,9 @@ async def get_or_generate_daily_image(
             prompt=prompt,
             config=types.GenerateImagesConfig(
                 number_of_images=1,
-                aspect_ratio="3:4",
+                aspect_ratio="9:16",
                 person_generation="dont_allow",
+                negative_prompt="text, words, letters, numbers, watermarks, signatures, labels, captions, titles",
             ),
         )
     except Exception as e:

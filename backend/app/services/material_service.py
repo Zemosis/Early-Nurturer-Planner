@@ -205,7 +205,11 @@ async def _generate_alphabet_pdf(circle_time: dict, theme: str, palette: dict) -
         f"soft pastel colors, suitable for ages 0-3. "
         f"ABSOLUTELY NO TEXT, NO LETTERS, NO WORDS, AND NO WATERMARKS IN THE IMAGE."
     )
-    image_bytes = await loop.run_in_executor(None, _generate_imagen, prompt)
+    negative_prompt = (
+        "text, words, letters, numbers, watermarks, signatures, labels, "
+        "realistic photo, 3D render"
+    )
+    image_bytes = await loop.run_in_executor(None, _generate_imagen, prompt, negative_prompt)
 
     # Retry with simpler fallback prompt if first attempt failed (safety filter, etc.)
     if not image_bytes:
@@ -217,7 +221,7 @@ async def _generate_alphabet_pdf(circle_time: dict, theme: str, palette: dict) -
             f"for a children's alphabet poster. Clean white background, "
             f"soft pastel colors. NO TEXT, NO WORDS, NO WATERMARKS."
         )
-        image_bytes = await loop.run_in_executor(None, _generate_imagen, fallback_prompt)
+        image_bytes = await loop.run_in_executor(None, _generate_imagen, fallback_prompt, negative_prompt)
         if not image_bytes:
             logger.warning("Alphabet fallback image also failed for letter %s", letter)
 
@@ -246,13 +250,15 @@ async def _generate_number_pdf(circle_time: dict, theme: str, palette: dict) -> 
     # Generate a single object image — duplicated N times in the template
     loop = asyncio.get_event_loop()
     prompt = (
-        f"A single, isolated, highly detailed {counting_object} on a pure white "
-        f"background. ONLY ONE ITEM. "
+        f"A cute, child-friendly soft watercolor illustration of a single, isolated "
+        f"{counting_object} on a clean white background. Soft pastel colors, "
+        f"suitable for ages 0-3. ONLY ONE ITEM. "
         f"ABSOLUTELY NO TEXT, NO NUMBERS, NO SYMBOLS."
     )
     negative_prompt = (
         "text, symbols, numbers, digits, wooden blocks, letters, "
-        "multiple items, group, overlapping items"
+        "multiple items, group, overlapping items, "
+        "watermark, realistic photo, 3D render"
     )
     image_bytes = await loop.run_in_executor(
         None, _generate_imagen, prompt, negative_prompt
@@ -319,7 +325,11 @@ async def _generate_color_pdf(circle_time: dict, palette: dict) -> bytes:
         f"Clean white background, soft pastel colors, suitable for ages 0-3. "
         f"ABSOLUTELY NO TEXT, NO LETTERS, NO WORDS, AND NO WATERMARKS IN THE IMAGE."
     )
-    image_bytes = await loop.run_in_executor(None, _generate_imagen, prompt)
+    negative_prompt = (
+        "text, words, letters, numbers, watermarks, signatures, labels, "
+        "realistic photo, 3D render"
+    )
+    image_bytes = await loop.run_in_executor(None, _generate_imagen, prompt, negative_prompt)
 
     # Retry with simpler fallback prompt if first attempt failed
     if not image_bytes:
@@ -331,7 +341,7 @@ async def _generate_color_pdf(circle_time: dict, palette: dict) -> bytes:
             f"for a children's poster. Clean white background, soft pastel colors. "
             f"NO TEXT, NO WORDS, NO WATERMARKS."
         )
-        image_bytes = await loop.run_in_executor(None, _generate_imagen, fallback_prompt)
+        image_bytes = await loop.run_in_executor(None, _generate_imagen, fallback_prompt, negative_prompt)
         if not image_bytes:
             logger.warning("Color fallback image also failed for %s", color_name)
 
