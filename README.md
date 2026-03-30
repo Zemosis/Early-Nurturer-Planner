@@ -5,14 +5,24 @@ AI-powered curriculum planning for infant and toddler classrooms (ages 0–36 mo
 ## Features
 
 - **AI Theme Generation:** Gemini 2.5 Flash generates personalized weekly themes based on enrolled students
-- **Multi-Agent Pipeline:** Architect → Auditor → Personalizer workflow ensures safety-audited, developmentally appropriate curriculum
+- **Parallelized Map-Reduce Pipeline:** Sub-20s curriculum generation via a 5-stage LangGraph pipeline:
+  1. **Fetch Context** — concurrently pulls student profiles and RAG pedagogy context from the DB
+  2. **Master Architect** — generates the weekly theme skeleton (theme, circle time, objectives, newsletter) in a single fast Gemini call (~5–8s)
+  3. **Parallel Generate** — fans out two concurrent tasks via `asyncio.gather`:
+     - *Day Architect* — generates all 5 personalized daily plans in one call (~12–15s)
+     - *Media Enricher* — simultaneously fetches real YouTube songs + DB yoga poses via vector search
+  4. **Assemble Plan** — merges skeleton + daily plans + enrichment into a validated `WeekPlanSchema`
+  5. **Save** — upserts the final plan to Postgres (conflict on `user_id + year + month + week_of_month`)
+- **Student Personalization:** Daily plans name individual children, reference their developmental tags, and include per-age-group adaptations (0–12m, 12–24m, 24–36m)
+- **RAG Pedagogy Grounding:** pgvector semantic search retrieves relevant chunks from pedagogy PDFs to ground every generation
 - **Calendar View:** Manage multiple weeks with drag-and-drop reordering and delete functionality
 - **Timeline Synchronization:** Curriculum weeks automatically map to chronological calendar weeks
-- **YouTube Integration:** Real greeting/goodbye songs and yoga videos enriched via YouTube Data API
-- **Vector Search:** Yoga poses selected from curated catalog using semantic similarity (pgvector)
+- **YouTube Integration:** Real greeting/goodbye songs enriched via YouTube Data API with deduplication
+- **Vector Search:** Yoga poses selected from curated catalog using semantic similarity (pgvector + Vertex AI embeddings)
 - **PDF Generation:** Download professional curriculum PDFs with cover images
 - **Bulk Material Export:** Download all circle-time posters as a single merged PDF
 - **Theme Swapping:** Instantly swap themes without regenerating the entire curriculum
+- **Background Theme Pool:** Per-user pool of 5 pre-generated theme options refilled via Google Cloud Tasks (or in-process in local dev)
 
 ---
 
@@ -134,13 +144,6 @@ git commit -m "Updated button colors in theme selection modal"
 # Step 4: Push to GitHub
 git push
 ```
-
-**Tips for good commit messages:**
-- ✅ "Fixed spacing in calendar view cards"
-- ✅ "Changed primary button color to match brand guidelines"
-- ✅ "Updated newsletter preview text size"
-- ❌ "changes" (too vague)
-- ❌ "fixed stuff" (not descriptive)
 
 **If you see a merge conflict:**
 - Don't panic! This means someone else changed the same file
