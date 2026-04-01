@@ -8,10 +8,8 @@
 import { motion } from "motion/react";
 import { RefreshCw, ChevronDown, ChevronUp, Loader2, ArrowRight } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
-import { ThemeDetail } from "../utils/themeData";
+import { ThemeDetail, fetchThemePool, transformApiThemeToThemeDetail } from 'shared';
 import { ThemeSelectionGrid } from "./ThemeSelectionGrid";
-import { fetchThemePool } from "../utils/api";
-import { transformApiThemeToThemeDetail } from "../utils/apiTransformers";
 
 interface ThemeSelectionHeaderProps {
   currentTheme: ThemeDetail;

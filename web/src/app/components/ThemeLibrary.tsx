@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { themeLibrary } from '../utils/themeData';
+import { themeLibrary } from 'shared';
 
 export function ThemeLibrary() {
   return (

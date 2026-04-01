@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Download, Loader2, Package, CheckCircle, Sparkles } from "lucide-react";
-import { WeekPlan } from "../../utils/mockData";
-import { BulkMaterialType, bulkExportMaterials } from "../../utils/api";
+import { WeekPlan, BulkMaterialType, bulkExportMaterials } from 'shared';
 import { CurriculumPDFDownload } from "../CurriculumPDFDownload";
 
 interface MaterialsTabProps {

@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { CalendarDays, Sparkles, Calendar, LayoutGrid, MessageCircle, BookOpen } from "lucide-react";
 import { GenerateWeekModal } from "../components/GenerateWeekModal";
 import { ChatAssistant } from "../components/ChatAssistant";
-import { usePlanner } from "../contexts/PlannerContext";
+import { usePlanner } from 'shared';
 
 export default function Dashboard() {
   const [showGenerateModal, setShowGenerateModal] = useState(false);

@@ -1,11 +1,16 @@
 /**
  * API client for the Early Nurturer Planner backend.
  *
- * In development: requests go through Vite dev proxy (/api → localhost:8000).
- * In production:  VITE_API_BASE_URL points to the Cloud Run service.
+ * Call configureApi(baseURL) before using any API functions.
+ * Web: pass import.meta.env.VITE_API_BASE_URL
+ * Mobile: pass the Cloud Run URL from app config
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+let apiBase = "";
+
+export function configureApi(baseURL: string) {
+  apiBase = baseURL;
+}
 export const DEFAULT_USER_ID = "83b58b5f-698b-4ae1-9529-f83d97641f01";
 
 // ── Theme Pool ──────────────────────────────────────────────
@@ -25,7 +30,7 @@ export interface ThemePoolResponse {
 export async function fetchThemePool(
   userId: string = DEFAULT_USER_ID
 ): Promise<ThemePoolResponse> {
-  const res = await fetch(`${API_BASE}/api/theme-pool/${userId}`);
+  const res = await fetch(`${apiBase}/api/theme-pool/${userId}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "Failed to fetch theme pool");
@@ -37,7 +42,7 @@ export async function refreshThemePool(
   keepIds: string[],
   userId: string = DEFAULT_USER_ID
 ): Promise<ThemePoolResponse> {
-  const res = await fetch(`${API_BASE}/api/theme-pool/${userId}/refresh`, {
+  const res = await fetch(`${apiBase}/api/theme-pool/${userId}/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ keep_ids: keepIds }),
@@ -66,7 +71,7 @@ export async function generateThemes(
     theme_count: params.themeCount ?? 5,
   };
 
-  const res = await fetch(`${API_BASE}/api/themes/generate`, {
+  const res = await fetch(`${apiBase}/api/themes/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -97,7 +102,7 @@ export async function generatePlan(
     theme_pool_id: params.themePoolId ?? null,
   };
 
-  const res = await fetch(`${API_BASE}/api/planner/generate`, {
+  const res = await fetch(`${apiBase}/api/planner/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -135,7 +140,7 @@ export async function deletePlan(
   planId: string,
   userId: string = DEFAULT_USER_ID
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/planner/${userId}/plan/${planId}`, {
+  const res = await fetch(`${apiBase}/api/planner/${userId}/plan/${planId}`, {
     method: "DELETE",
   });
   if (!res.ok) {
@@ -148,7 +153,7 @@ export async function reorderPlans(
   updates: PlanPositionUpdate[],
   userId: string = DEFAULT_USER_ID
 ): Promise<WeekPlanSummary[]> {
-  const res = await fetch(`${API_BASE}/api/planner/${userId}/plans/reorder`, {
+  const res = await fetch(`${apiBase}/api/planner/${userId}/plans/reorder`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
@@ -163,7 +168,7 @@ export async function reorderPlans(
 export async function fetchAllPlans(
   userId: string = DEFAULT_USER_ID
 ): Promise<WeekPlanSummary[]> {
-  const res = await fetch(`${API_BASE}/api/planner/${userId}/plans`);
+  const res = await fetch(`${apiBase}/api/planner/${userId}/plans`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "Failed to fetch plans");
@@ -175,7 +180,7 @@ export async function fetchPlanById(
   planId: string,
   userId: string = DEFAULT_USER_ID
 ): Promise<Record<string, unknown>> {
-  const res = await fetch(`${API_BASE}/api/planner/${userId}/plan/${planId}`);
+  const res = await fetch(`${apiBase}/api/planner/${userId}/plan/${planId}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "Failed to fetch plan");
@@ -196,7 +201,7 @@ export async function swapTheme(
   userId: string = DEFAULT_USER_ID
 ): Promise<SwapThemeResult> {
   const res = await fetch(
-    `${API_BASE}/api/planner/${userId}/plan/${currentPlanId}/swap/${poolThemeId}`,
+    `${apiBase}/api/planner/${userId}/plan/${currentPlanId}/swap/${poolThemeId}`,
     { method: "POST" }
   );
   if (!res.ok) {
@@ -219,7 +224,7 @@ export async function downloadPlanPDF(
 ): Promise<Blob> {
   const userId = params.userId ?? DEFAULT_USER_ID;
   const res = await fetch(
-    `${API_BASE}/api/planner/${userId}/plan/${params.planId}/pdf`
+    `${apiBase}/api/planner/${userId}/plan/${params.planId}/pdf`
   );
 
   if (!res.ok) {
@@ -236,7 +241,7 @@ export async function regeneratePlanPDF(
 ): Promise<Blob> {
   const uid = userId ?? DEFAULT_USER_ID;
   const res = await fetch(
-    `${API_BASE}/api/planner/${uid}/plan/${planId}/pdf/regenerate`,
+    `${apiBase}/api/planner/${uid}/plan/${planId}/pdf/regenerate`,
     { method: "POST" }
   );
 
@@ -259,7 +264,7 @@ export async function downloadMaterial(
   userId: string = DEFAULT_USER_ID
 ): Promise<string> {
   const res = await fetch(
-    `${API_BASE}/api/planner/${userId}/plan/${planId}/material/${materialType}`
+    `${apiBase}/api/planner/${userId}/plan/${planId}/material/${materialType}`
   );
 
   if (!res.ok) {
@@ -288,7 +293,7 @@ export async function searchYouTube(
   const params = new URLSearchParams({ q: query });
   if (excludeId) params.set("exclude_id", excludeId);
 
-  const res = await fetch(`${API_BASE}/api/planner/youtube/search?${params}`);
+  const res = await fetch(`${apiBase}/api/planner/youtube/search?${params}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     console.error("YouTube search failed:", res.status, err);
@@ -316,7 +321,7 @@ export async function updateCircleTimeSongs(
   userId: string = DEFAULT_USER_ID
 ): Promise<{ status: string; circle_time: Record<string, unknown> }> {
   const res = await fetch(
-    `${API_BASE}/api/planner/${userId}/plan/${planId}/circle-time`,
+    `${apiBase}/api/planner/${userId}/plan/${planId}/circle-time`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -338,7 +343,7 @@ export async function bulkExportMaterials(
   userId: string = DEFAULT_USER_ID
 ): Promise<{ blob: Blob; filename: string }> {
   const res = await fetch(
-    `${API_BASE}/api/planner/${userId}/plan/${planId}/materials/bulk-export`,
+    `${apiBase}/api/planner/${userId}/plan/${planId}/materials/bulk-export`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

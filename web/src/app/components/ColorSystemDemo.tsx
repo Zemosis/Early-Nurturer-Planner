@@ -9,7 +9,7 @@
  */
 
 import { Palette, Calendar } from "lucide-react";
-import { useTheme } from "../contexts/ThemeContext";
+import { useTheme } from 'shared';
 
 export function ColorSystemDemo() {
   const { currentTheme } = useTheme();

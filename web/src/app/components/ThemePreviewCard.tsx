@@ -7,7 +7,7 @@
 
 import { motion } from "motion/react";
 import { RefreshCw, Check, Sparkles } from "lucide-react";
-import { ThemeDetail } from "../utils/themeData";
+import { ThemeDetail } from 'shared';
 
 interface ThemePreviewCardProps {
   theme: ThemeDetail;

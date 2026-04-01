@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Clock, Tag, FileText, Trash2, Save } from 'lucide-react';
-import { ScheduleBlock, formatTime12Hour, calculateDuration } from '../contexts/ScheduleContext';
+import { ScheduleBlock, formatTime12Hour, calculateDuration } from 'shared';
 
 interface ScheduleBlockEditorProps {
   block: ScheduleBlock | null;

@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { Music, ChevronDown, ChevronUp, Clock, Play, Download, Loader2, ExternalLink, FileText, Search, RefreshCw, Check, X } from "lucide-react";
-import { WeekPlan } from "../../utils/mockData";
+import { WeekPlan, downloadMaterial, MaterialType, searchYouTube, updateCircleTimeSongs, YouTubeSearchResult } from 'shared';
 import { YogaSection } from "../circle-time/YogaSection";
 import { MusicMovementSection } from "../circle-time/MusicMovementSection";
-import { downloadMaterial, MaterialType, searchYouTube, updateCircleTimeSongs, YouTubeSearchResult } from "../../utils/api";
 
 interface CircleTimeTabProps {
   week: WeekPlan;

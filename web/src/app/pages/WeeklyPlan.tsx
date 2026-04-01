@@ -11,11 +11,7 @@ import { NewsletterTab } from "../components/tabs/NewsletterTab";
 import { DocumentationTab } from "../components/tabs/DocumentationTab";
 import { DailyScheduleTab } from "../components/tabs/DailyScheduleTab";
 import { ThemeSelectionHeader } from "../components/ThemeSelectionHeader";
-import { useTheme } from "../contexts/ThemeContext";
-import { usePlanner } from "../contexts/PlannerContext";
-import { ThemeDetail } from "../utils/themeData";
-import { fetchPlanById, swapTheme } from "../utils/api";
-import { transformApiPlanToWeekPlan } from "../utils/apiTransformers";
+import { useTheme, usePlanner, ThemeDetail, fetchPlanById, swapTheme, transformApiPlanToWeekPlan } from 'shared';
 
 const tabs = [
   { id: "overview", label: "Overview" },

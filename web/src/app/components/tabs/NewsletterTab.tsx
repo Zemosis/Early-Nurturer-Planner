@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Copy, Download } from "lucide-react";
-import { WeekPlan } from "../../utils/mockData";
+import { WeekPlan } from 'shared';
 
 interface NewsletterTabProps {
   week: WeekPlan;

@@ -1,5 +1,5 @@
 import { Download, FileText, Music, ExternalLink } from "lucide-react";
-import { WeekPlan } from "../../utils/mockData";
+import { WeekPlan } from 'shared';
 
 interface OverviewTabProps {
   week: WeekPlan;

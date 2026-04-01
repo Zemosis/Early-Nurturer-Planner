@@ -3,8 +3,8 @@
  * (camelCase) so existing UI components need zero changes.
  */
 
-import { ThemeDetail } from "./themeData";
-import { WeekPlan } from "./mockData";
+import { ThemeDetail } from "../data/themeData";
+import { WeekPlan } from "../data/mockData";
 
 // ── Static data injected into plans (AI doesn't generate URLs) ──
 

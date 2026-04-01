@@ -2,8 +2,7 @@
  * Activity Enhancer - Converts simple activities to detailed templates
  */
 
-import { DetailedActivity, DevelopmentalObjective, Material, InstructionStep, AgeAdaptation, DifferentiationStrategy, ObservationPrompt } from '../types/activity';
-import { WeekPlan } from './mockData';
+import { DetailedActivity, DevelopmentalObjective, Material, InstructionStep, AgeAdaptation, DifferentiationStrategy, ObservationPrompt, WeekPlan } from 'shared';
 
 export function enhanceActivity(
   activity: WeekPlan['activities'][0],

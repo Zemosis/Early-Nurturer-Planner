@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
-import { yearData } from "../utils/mockData";
+import { yearData, getThemeByName } from 'shared';
 import { ChatAssistant } from "../components/ChatAssistant";
-import { getThemeByName } from "../utils/themeData";
 
 export default function YearOverview() {
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);

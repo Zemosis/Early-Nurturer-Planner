@@ -22,7 +22,7 @@ import {
   Calendar,
   Tag,
 } from 'lucide-react';
-import { DetailedActivity, ageGroupConfig, domainConfig } from '../types/activity';
+import { DetailedActivity, ageGroupConfig, domainConfig } from 'shared';
 
 interface DetailedActivityViewProps {
   activity: DetailedActivity;

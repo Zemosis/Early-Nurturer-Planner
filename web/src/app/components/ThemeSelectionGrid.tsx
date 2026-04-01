@@ -8,7 +8,7 @@
 import { motion, AnimatePresence } from "motion/react";
 import { Check, Sparkles, Eye, Bookmark } from "lucide-react";
 import { useState } from "react";
-import { ThemeDetail } from "../utils/themeData";
+import { ThemeDetail } from 'shared';
 
 interface ThemeSelectionGridProps {
   themes: ThemeDetail[];

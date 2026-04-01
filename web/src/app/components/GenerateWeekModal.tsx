@@ -1,12 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Sparkles, RefreshCw, ArrowRight, AlertCircle, X } from "lucide-react";
-import { useTheme } from "../contexts/ThemeContext";
-import { ThemeDetail } from "../utils/themeData";
+import { useTheme, ThemeDetail, usePlanner, fetchThemePool, refreshThemePool, generatePlan, ThemePoolItem, transformApiThemeToThemeDetail, transformApiPlanToWeekPlan } from 'shared';
 import { ThemeSelectionGrid } from "./ThemeSelectionGrid";
-import { usePlanner } from "../contexts/PlannerContext";
-import { fetchThemePool, refreshThemePool, generatePlan, ThemePoolItem } from "../utils/api";
-import { transformApiThemeToThemeDetail, transformApiPlanToWeekPlan } from "../utils/apiTransformers";
 
 const POLL_INTERVAL_MS = 3000;
 

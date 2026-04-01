@@ -1,7 +1,8 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { WeekPlan } from "../utils/mockData";
-import { ThemeDetail } from "../utils/themeData";
-import { WeekPlanSummary, ThemePoolItem } from "../utils/api";
+import { createContext, useContext, useState, ReactNode } from "react";
+import { WeekPlan } from "../data/mockData";
+import { ThemeDetail } from "../data/themeData";
+import { WeekPlanSummary, ThemePoolItem } from "../api/api";
+import { StorageProvider } from "../storage";
 
 interface PlannerContextType {
   currentPlan: WeekPlan | null;
@@ -22,18 +23,23 @@ interface PlannerContextType {
 
 const PlannerContext = createContext<PlannerContextType | undefined>(undefined);
 
-export function PlannerProvider({ children }: { children: ReactNode }) {
+interface PlannerProviderProps {
+  children: ReactNode;
+  storageProvider: StorageProvider;
+}
+
+export function PlannerProvider({ children, storageProvider }: PlannerProviderProps) {
   const [currentPlan, setCurrentPlan] = useState<WeekPlan | null>(null);
   const [currentPlanId, _setCurrentPlanId] = useState<string | null>(
     () => {
-      try { return localStorage.getItem("currentPlanId"); } catch { return null; }
+      try { return storageProvider.getItem("currentPlanId"); } catch { return null; }
     }
   );
   const setCurrentPlanId = (id: string | null) => {
     _setCurrentPlanId(id);
     try {
-      if (id) localStorage.setItem("currentPlanId", id);
-      else localStorage.removeItem("currentPlanId");
+      if (id) storageProvider.setItem("currentPlanId", id);
+      else storageProvider.removeItem("currentPlanId");
     } catch { /* SSR / private browsing */ }
   };
   const [allPlans, setAllPlans] = useState<WeekPlanSummary[]>([]);

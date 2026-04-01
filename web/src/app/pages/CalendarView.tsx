@@ -4,8 +4,7 @@ import { ArrowLeft, CheckCircle2, Loader2, GripVertical, LayoutList, Check, X, M
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { ChatAssistant } from "../components/ChatAssistant";
-import { usePlanner } from "../contexts/PlannerContext";
-import { fetchAllPlans, reorderPlans, deletePlan, WeekPlanSummary, PlanPositionUpdate } from "../utils/api";
+import { usePlanner, fetchAllPlans, reorderPlans, deletePlan, WeekPlanSummary, PlanPositionUpdate } from 'shared';
 
 const MONTH_NAMES = [
   "", "January", "February", "March", "April", "May", "June",

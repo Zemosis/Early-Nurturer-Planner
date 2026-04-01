@@ -5,8 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { FileText, Download, Eye, Printer, Check, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
-import { WeekPlan } from '../utils/mockData';
-import { downloadPlanPDF, regeneratePlanPDF } from '../utils/api';
+import { WeekPlan, downloadPlanPDF, regeneratePlanPDF } from 'shared';
 
 interface CurriculumPDFDownloadProps {
   week: WeekPlan;

@@ -11,9 +11,7 @@ import {
   User,
   FileText,
 } from "lucide-react";
-import { Student } from "../../types/student";
-import { WeekPlan } from "../../utils/mockData";
-import { getInitials, formatAge, getAgeGroupColor } from "../../utils/studentData";
+import { Student, WeekPlan, getInitials, formatAge, getAgeGroupColor } from 'shared';
 
 interface StudentProfileViewProps {
   student: Student;

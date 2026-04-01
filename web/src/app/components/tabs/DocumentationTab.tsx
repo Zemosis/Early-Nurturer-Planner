@@ -10,15 +10,7 @@ import {
   Eye,
   X
 } from "lucide-react";
-import { WeekPlan } from "../../utils/mockData";
-import { Student } from "../../types/student";
-import { 
-  mockStudents, 
-  getInitials, 
-  getAgeGroupColor, 
-  formatAge,
-  calculateAge 
-} from "../../utils/studentData";
+import { WeekPlan, Student, mockStudents, getInitials, getAgeGroupColor, formatAge, calculateAge } from 'shared';
 import { AddStudentModal } from "../modals/AddStudentModal";
 import { StudentProfileView } from "../student/StudentProfileView";
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X, Upload, User } from "lucide-react";
-import { Student } from "../../types/student";
+import { Student } from 'shared';
 
 interface AddStudentModalProps {
   onClose: () => void;

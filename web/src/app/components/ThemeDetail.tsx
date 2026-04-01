@@ -1,7 +1,6 @@
 import { useParams, Link } from 'react-router';
-import { getThemeById } from '../utils/themeData';
+import { getThemeById, useTheme } from 'shared';
 import { Book, Music, Palette, Sparkles, Home, Circle } from 'lucide-react';
-import { useTheme } from '../contexts/ThemeContext';
 import { useEffect } from 'react';
 import { ThemeColorPreview } from './ThemeColorPreview';
 

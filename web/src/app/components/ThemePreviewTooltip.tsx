@@ -7,7 +7,7 @@
 
 import { motion, AnimatePresence } from "motion/react";
 import { Eye, Sparkles } from "lucide-react";
-import { ThemeDetail } from "../utils/themeData";
+import { ThemeDetail } from 'shared';
 
 interface ThemePreviewTooltipProps {
   theme: ThemeDetail | null;

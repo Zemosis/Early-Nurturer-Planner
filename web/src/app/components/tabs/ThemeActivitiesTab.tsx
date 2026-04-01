@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Clock, ArrowLeft, ArrowRight } from "lucide-react";
-import { WeekPlan } from "../../utils/mockData";
+import { WeekPlan, DetailedActivity } from 'shared';
 import { enhanceActivity } from "../../utils/activityEnhancer";
 import { DetailedActivityView } from "../DetailedActivityView";
-import { DetailedActivity } from "../../types/activity";
 
 interface ThemeActivitiesTabProps {
   week: WeekPlan;

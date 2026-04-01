@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Clock, Info, Edit2, GripVertical, Lock, Unlock, Plus, Sparkles } from "lucide-react";
-import { WeekPlan } from "../../utils/mockData";
-import { useSchedule, ScheduleBlock, formatTime12Hour, calculateDuration } from "../../contexts/ScheduleContext";
+import { WeekPlan, useSchedule, ScheduleBlock, formatTime12Hour, calculateDuration } from 'shared';
 import { ScheduleBlockEditor } from "../ScheduleBlockEditor";
 import { AddActivityModal } from "../AddActivityModal";
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
