@@ -3,8 +3,7 @@ SQLAlchemy ORM models for the Early Nurturer Planner.
 
 Organized into two sections:
   1. Relational models  — users, students, weekly_plans, chat_history
-  2. Agentic / vector   — student_embeddings, agent_reasoning_logs,
-                           agent_checkpoints, critique_history,
+  2. Agentic / vector   — student_embeddings, agent_checkpoints,
                            vector_store_curriculum
 
 All vector columns use pgvector (1536-dim by default, matching common
@@ -336,52 +335,6 @@ class StudentEmbedding(Base):
     )
 
 
-class AgentReasoningLog(Base):
-    """Chain-of-Thought log for every LangGraph agent invocation.
-
-    Captures the internal monologue and tool calls so the system
-    is fully auditable and debuggable.
-    """
-
-    __tablename__ = "agent_reasoning_logs"
-
-    log_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    thread_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, index=True,
-        doc="LangGraph thread / conversation ID."
-    )
-    agent_name: Mapped[str] = mapped_column(
-        String(100), nullable=False,
-        doc="Which agent produced this log: architect, auditor, personalizer, etc."
-    )
-    internal_monologue: Mapped[str] = mapped_column(
-        Text, nullable=False,
-        doc="The agent's full chain-of-thought reasoning."
-    )
-    tools_used: Mapped[list | None] = mapped_column(
-        JSONB, default=list,
-        doc='[{"tool": "search_curriculum", "input": {...}, "output": {...}}]'
-    )
-    input_summary: Mapped[str | None] = mapped_column(
-        Text, doc="Condensed version of what the agent received."
-    )
-    output_summary: Mapped[str | None] = mapped_column(
-        Text, doc="Condensed version of what the agent produced."
-    )
-    duration_ms: Mapped[int | None] = mapped_column(
-        Integer, doc="Wall-clock time for this reasoning step."
-    )
-    timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-    __table_args__ = (
-        Index("ix_agent_logs_thread_ts", "thread_id", "timestamp"),
-    )
-
-
 class AgentCheckpoint(Base):
     """LangGraph checkpoint persistence.
 
@@ -419,53 +372,6 @@ class AgentCheckpoint(Base):
 
     __table_args__ = (
         Index("ix_checkpoints_thread_ns", "thread_id", "checkpoint_ns"),
-    )
-
-
-class CritiqueHistory(Base):
-    """Records of internal debates between the Architect and Auditor agents.
-
-    Each row is one round of critique: the original proposal, the
-    auditor's feedback, and the revised output (if any).
-    """
-
-    __tablename__ = "critique_history"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    thread_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, index=True,
-        doc="LangGraph thread / conversation context."
-    )
-    round_number: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1,
-        doc="Which critique round (1 = first pass, 2 = revision, …)."
-    )
-    architect_proposal: Mapped[str] = mapped_column(
-        Text, nullable=False,
-        doc="The Architect agent's original or revised plan."
-    )
-    auditor_feedback: Mapped[str] = mapped_column(
-        Text, nullable=False,
-        doc="The Auditor agent's critique / objections."
-    )
-    resolution: Mapped[str | None] = mapped_column(
-        Text, doc="Final merged output after the debate settled."
-    )
-    accepted: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False,
-        doc="Whether the Auditor accepted the proposal."
-    )
-    scores: Mapped[dict | None] = mapped_column(
-        JSONB, doc='{"safety": 9, "developmental_fit": 8, "creativity": 7}'
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-    __table_args__ = (
-        Index("ix_critique_thread_round", "thread_id", "round_number"),
     )
 
 
