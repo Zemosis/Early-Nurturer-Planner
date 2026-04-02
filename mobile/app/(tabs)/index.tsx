@@ -84,6 +84,8 @@ export default function DashboardScreen() {
     </Pressable>
   );
 
+  const recentPlans = allPlans.slice(0, 3);
+
   return (
     <View className="flex-1 bg-background">
       <View className="px-4 pt-14 pb-3">
@@ -93,11 +95,30 @@ export default function DashboardScreen() {
         </Text>
       </View>
       <FlatList
-        data={allPlans}
+        data={recentPlans}
         keyExtractor={(item) => item.id}
         renderItem={renderPlanCard}
         contentContainerClassName="px-4 pb-6"
         showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          allPlans.length > 3 ? (
+            <Text className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">
+              Recent Plans
+            </Text>
+          ) : null
+        }
+        ListFooterComponent={
+          allPlans.length > 3 ? (
+            <Pressable
+              onPress={() => router.push("/calendar")}
+              className="mt-2 py-3 items-center rounded-lg border border-primary"
+            >
+              <Text className="text-primary font-semibold text-sm">
+                View Full Calendar
+              </Text>
+            </Pressable>
+          ) : null
+        }
       />
     </View>
   );
