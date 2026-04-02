@@ -40,4 +40,5 @@ temp_pdfs/
 
 # Claude
 CLAUDE.md
+.claude/
 

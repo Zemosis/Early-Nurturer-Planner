@@ -8,5 +8,7 @@ venv/
 .gitignore
 dev-log.md
 scripts/
+.claude/
+CLAUDE.md   
 alembic/
 *.json
