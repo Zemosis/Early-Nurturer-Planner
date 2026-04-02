@@ -14,6 +14,9 @@ export * from './src/api/apiTransformers';
 // Storage
 export * from './src/storage';
 
+// Utils
+export * from './src/utils/activityEnhancer';
+
 // Contexts
 export * from './src/contexts/PlannerContext';
 export * from './src/contexts/ThemeContext';

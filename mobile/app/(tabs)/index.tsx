@@ -60,29 +60,33 @@ export default function DashboardScreen() {
     );
   }
 
-  const renderPlanCard = ({ item }: { item: WeekPlanSummary }) => (
-    <Pressable onPress={() => router.push(`/week/${item.id}`)}>
-      <Card className="mb-3">
-        <CardHeader>
-          <CardTitle>{`${item.theme_emoji} ${item.theme}`}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Text className="text-sm text-muted-foreground mb-2">
-            Week {item.global_week_number} &middot; {item.week_range}
-          </Text>
-          {item.domains && item.domains.length > 0 && (
-            <View className="flex-row flex-wrap gap-1.5">
-              {item.domains.map((domain) => (
-                <Badge key={domain} variant="secondary">
-                  {domain}
-                </Badge>
-              ))}
-            </View>
-          )}
-        </CardContent>
-      </Card>
-    </Pressable>
-  );
+  const renderPlanCard = ({ item }: { item: WeekPlanSummary }) => {
+    const planColor = item.palette?.primary || "#387F39";
+    return (
+      <Pressable onPress={() => router.push(`/week/${item.id}`)}>
+        <View
+          className="mb-3 rounded-xl overflow-hidden border border-border bg-card"
+          style={{ borderLeftWidth: 4, borderLeftColor: planColor }}
+        >
+          <View className="p-4">
+            <Text className="text-base font-semibold text-foreground">{`${item.theme_emoji} ${item.theme}`}</Text>
+            <Text className="text-sm text-muted-foreground mt-1">
+              {`Week ${item.global_week_number} \u00B7 ${item.week_range}`}
+            </Text>
+            {item.domains && item.domains.length > 0 && (
+              <View className="flex-row flex-wrap gap-1.5 mt-2">
+                {item.domains.map((domain) => (
+                  <View key={domain} className="rounded-full px-2.5 py-0.5" style={{ backgroundColor: planColor + "15" }}>
+                    <Text style={{ color: planColor, fontSize: 11, fontWeight: "500" }}>{domain}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        </View>
+      </Pressable>
+    );
+  };
 
   return (
     <View className="flex-1 bg-background">
