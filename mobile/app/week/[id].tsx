@@ -18,6 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   fetchPlanById,
   transformApiPlanToWeekPlan,
+  updatePlanSchedule,
   getApiBase,
   DEFAULT_USER_ID,
   type WeekPlan,
@@ -113,6 +114,7 @@ export default function WeekPlanScreen() {
   const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
   const [checkedMaterials, setCheckedMaterials] = useState<Set<string>>(new Set());
+  const [savingSchedule, setSavingSchedule] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -135,15 +137,31 @@ export default function WeekPlanScreen() {
     }, [id])
   );
 
-  // Initialize the timed schedule when plan loads
+  // Initialize the timed schedule when plan loads — prefer persisted schedule
   useEffect(() => {
     if (!plan) return;
     const wId = `week-${plan.weekNumber}`;
     const existing = getSchedule(wId);
     if (existing.length === 0) {
-      initializeSchedule(wId, getDefaultSchedule(plan));
+      const persisted = plan.schedule?.[wId];
+      initializeSchedule(wId, persisted && persisted.length > 0 ? persisted : getDefaultSchedule(plan));
     }
   }, [plan]);
+
+  // Persist schedule changes to the backend
+  const persistSchedule = useCallback(async (updatedBlocks: ScheduleBlock[]) => {
+    if (!plan || !id) return;
+    const wId = `week-${plan.weekNumber}`;
+    setSavingSchedule(true);
+    try {
+      await updatePlanSchedule(id, { [wId]: updatedBlocks });
+    } catch (e) {
+      console.warn("Failed to save schedule:", e);
+      Alert.alert("Save failed", "Your schedule changes could not be saved. Please try again.");
+    } finally {
+      setSavingSchedule(false);
+    }
+  }, [plan, id]);
 
   const handleDownloadPDF = async () => {
     if (!id) return;
@@ -485,7 +503,15 @@ export default function WeekPlanScreen() {
             <View className="flex-row items-center justify-between mb-4">
               <View>
                 <Text className="text-lg font-semibold text-foreground">Daily Flow</Text>
-                <Text className="text-xs text-muted-foreground">{`${schedule.length} blocks`}</Text>
+                <View className="flex-row items-center gap-2">
+                  <Text className="text-xs text-muted-foreground">{`${schedule.length} blocks`}</Text>
+                  {savingSchedule && (
+                    <View className="flex-row items-center gap-1">
+                      <ActivityIndicator size="small" color={tc.primary} />
+                      <Text className="text-xs" style={{ color: tc.primary }}>Saving…</Text>
+                    </View>
+                  )}
+                </View>
               </View>
               <Pressable
                 onPress={toggleLock}
@@ -553,13 +579,28 @@ export default function WeekPlanScreen() {
             block={editingBlock}
             themeColor={tc.primary}
             onSave={(saved) => {
+              // Optimistic update
               if (editingBlock) {
                 updateBlock(weekId, saved.id, saved);
               } else {
                 addBlock(weekId, saved);
               }
+              // Compute the updated schedule and persist
+              const current = getSchedule(weekId);
+              let updated: ScheduleBlock[];
+              if (editingBlock) {
+                updated = current.map(b => b.id === saved.id ? { ...b, ...saved } : b);
+              } else {
+                updated = [...current, { ...saved, id: saved.id || `block-${Date.now()}` }]
+                  .sort((a, b) => a.startTime.localeCompare(b.startTime));
+              }
+              persistSchedule(updated);
             }}
-            onDelete={(blockId) => deleteBlock(weekId, blockId)}
+            onDelete={(blockId) => {
+              deleteBlock(weekId, blockId);
+              const updated = getSchedule(weekId).filter(b => b.id !== blockId);
+              persistSchedule(updated);
+            }}
             onClose={() => { setEditorVisible(false); setEditingBlock(null); }}
           />
         </View>

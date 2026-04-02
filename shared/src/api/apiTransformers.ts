@@ -231,5 +231,6 @@ export function transformApiPlanToWeekPlan(api: any): WeekPlan {
     materialUrls: api.material_urls ?? undefined,
     palette: api.palette ?? undefined,
     generated: true,
+    schedule: api.schedule ?? undefined,
   };
 }

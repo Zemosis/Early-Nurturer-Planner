@@ -230,6 +230,11 @@ class WeeklyPlan(Base):
         JSONB,
         doc='{"alphabet_pdf_url": "...", "number_pdf_url": "...", "shape_pdf_url": "...", "color_pdf_url": "..."}'
     )
+    schedule: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True,
+        doc='User-edited daily timed schedule blocks, keyed by weekId. '
+            '{"week-1": [{"id": "block-...", "startTime": "08:00", ...}]}'
+    )
     is_generated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

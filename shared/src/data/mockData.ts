@@ -78,6 +78,7 @@ export interface WeekPlan {
     background: string;
   };
   generated: boolean;
+  schedule?: Record<string, import('../contexts/ScheduleContext').ScheduleBlock[]>;
 }
 
 // Theme-appropriate song database

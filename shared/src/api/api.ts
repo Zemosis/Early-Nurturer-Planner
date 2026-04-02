@@ -339,6 +339,30 @@ export async function updateCircleTimeSongs(
   return res.json();
 }
 
+// ── Schedule Sync ──────────────────────────────────────────
+
+import type { ScheduleBlock } from '../contexts/ScheduleContext';
+
+export async function updatePlanSchedule(
+  planId: string,
+  schedule: Record<string, ScheduleBlock[]>,
+  userId: string = DEFAULT_USER_ID
+): Promise<{ status: string; schedule: Record<string, ScheduleBlock[]> }> {
+  const res = await fetch(
+    `${apiBase}/api/planner/${userId}/plan/${planId}/schedule`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ schedule }),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Schedule update failed");
+  }
+  return res.json();
+}
+
 // ── Bulk Material Export ────────────────────────────────────
 
 export async function bulkExportMaterials(
