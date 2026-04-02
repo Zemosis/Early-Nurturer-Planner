@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -7,7 +7,7 @@ import {
   Pressable,
   Alert,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import PagerView from "react-native-pager-view";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
@@ -36,24 +36,26 @@ export default function WeekPlanScreen() {
   const pagerRef = useRef<PagerView>(null);
   const chatSheetRef = useRef<ChatAssistantRef>(null);
 
-  useEffect(() => {
-    if (!id) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await fetchPlanById(id);
-        if (!cancelled) {
-          const transformed = transformApiPlanToWeekPlan(data);
-          setPlan(transformed);
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return;
+      let cancelled = false;
+      (async () => {
+        try {
+          const data = await fetchPlanById(id);
+          if (!cancelled) {
+            const transformed = transformApiPlanToWeekPlan(data);
+            setPlan(transformed);
+          }
+        } catch {
+          if (!cancelled) setError("Failed to load plan details.");
+        } finally {
+          if (!cancelled) setLoading(false);
         }
-      } catch {
-        if (!cancelled) setError("Failed to load plan details.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [id]);
+      })();
+      return () => { cancelled = true; };
+    }, [id])
+  );
 
   const handleDownloadPDF = async () => {
     if (!id) return;

@@ -17,7 +17,6 @@ import {
   transformApiThemeToThemeDetail,
   transformApiPlanToWeekPlan,
   type ThemePoolItem,
-  type ThemeDetail,
 } from "shared";
 import { Card, CardHeader, CardTitle, CardContent } from "../../components/ui/Card";
 import { Badge } from "../../components/ui/Badge";
@@ -31,7 +30,6 @@ export default function ThemesScreen() {
     setIsGenerating,
     setCurrentPlan,
     setCurrentPlanId,
-    setError,
   } = usePlanner();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -88,10 +86,13 @@ export default function ThemesScreen() {
         selectedTheme: item.theme_data,
         themePoolId: item.id,
       });
-      const plan = transformApiPlanToWeekPlan(result.plan);
+      const plan = transformApiPlanToWeekPlan({ ...result.plan, id: result.plan_id });
       setCurrentPlan(plan);
       if (result.plan_id) {
         setCurrentPlanId(result.plan_id);
+      }
+      await loadPool();
+      if (result.plan_id) {
         router.push(`/week/${result.plan_id}`);
       }
     } catch (e) {

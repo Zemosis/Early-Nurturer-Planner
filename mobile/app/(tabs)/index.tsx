@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { usePlanner, fetchAllPlans, type WeekPlanSummary } from "shared";
 import { Card, CardHeader, CardTitle, CardContent } from "../../components/ui/Card";
 import { Badge } from "../../components/ui/Badge";
@@ -11,23 +11,25 @@ export default function DashboardScreen() {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const plans = await fetchAllPlans();
-        if (!cancelled) {
-          setAllPlans(plans);
-          setError(null);
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        try {
+          const plans = await fetchAllPlans();
+          if (!cancelled) {
+            setAllPlans(plans);
+            setError(null);
+          }
+        } catch (e) {
+          if (!cancelled) setError("Failed to load plans. Check your connection.");
+        } finally {
+          if (!cancelled) setLoading(false);
         }
-      } catch (e) {
-        if (!cancelled) setError("Failed to load plans. Check your connection.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+      })();
+      return () => { cancelled = true; };
+    }, [])
+  );
 
   if (loading) {
     return (
