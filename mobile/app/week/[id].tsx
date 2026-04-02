@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef, useMemo } from "react";
+import { useCallback, useState, useRef, useMemo, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   ActivityIndicator,
   Pressable,
   Alert,
+  Image,
+  Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import PagerView from "react-native-pager-view";
@@ -18,6 +20,10 @@ import {
   getApiBase,
   DEFAULT_USER_ID,
   type WeekPlan,
+  useSchedule,
+  type ScheduleBlock,
+  formatTime12Hour,
+  calculateDuration,
 } from "shared";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
@@ -27,14 +33,46 @@ import ChatAssistantBottomSheet, { type ChatAssistantRef } from "../../component
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 
 const SECTION_TABS = [
-  { key: "schedule", label: "Daily Schedule", icon: "calendar" as const },
-  { key: "objectives", label: "Objectives", icon: "flag" as const },
-  { key: "circle", label: "Circle Time", icon: "people" as const },
-  { key: "materials", label: "Materials", icon: "cart" as const },
-  { key: "newsletter", label: "Newsletter", icon: "mail" as const },
+  { key: "schedule", label: "Schedule" },
+  { key: "activities", label: "Activities" },
+  { key: "circle", label: "Circle Time" },
+  { key: "objectives", label: "Objectives" },
+  { key: "materials", label: "Materials" },
+  { key: "newsletter", label: "Newsletter" },
 ] as const;
 
 type SectionKey = (typeof SECTION_TABS)[number]["key"];
+
+const CATEGORY_COLORS: Record<string, { bg: string; border: string; dot: string; label: string }> = {
+  circle: { bg: "#7A9B7615", border: "#7A9B76", dot: "#7A9B76", label: "Circle Time" },
+  yoga: { bg: "#B4A7D615", border: "#9B8FCC", dot: "#9B8FCC", label: "Yoga Time" },
+  theme: { bg: "#F4B74015", border: "#F4B740", dot: "#F4B740", label: "Theme Activity" },
+  "gross-motor": { bg: "#D4845B15", border: "#D4845B", dot: "#D4845B", label: "Gross Motor" },
+  sensory: { bg: "#7FABBB15", border: "#7FABBB", dot: "#7FABBB", label: "Sensory Activity" },
+  "free-play": { bg: "#E8A5B815", border: "#E8A5B8", dot: "#E8A5B8", label: "Free Play" },
+  transition: { bg: "#C8B6A615", border: "#C8B6A6", dot: "#C8B6A6", label: "Transition" },
+  routine: { bg: "#E8E8E8", border: "#B8B8B8", dot: "#B8B8B8", label: "Daily Routine" },
+};
+
+function getDefaultSchedule(week: WeekPlan): ScheduleBlock[] {
+  return [
+    { id: "block-arrival", startTime: "08:00", endTime: "08:30", title: "Arrival & Free Play", description: "Greet children, health check, self-directed exploration", category: "free-play" },
+    { id: "block-snack-1", startTime: "08:30", endTime: "08:45", title: "Morning Snack", description: "Healthy snack and social time", category: "routine" },
+    { id: "block-circle", startTime: "08:45", endTime: "09:00", title: "Circle Time", description: `${week.circleTime.greetingSong.title} • Letter ${week.circleTime.letter} • Color ${week.circleTime.color}`, category: "circle" },
+    { id: "block-yoga", startTime: "09:00", endTime: "09:15", title: "\uD83E\uDDD8 Yoga Time", description: "Mindful movement and breathing • Linked to Circle Time yoga poses", category: "yoga" },
+    { id: "block-theme", startTime: "09:15", endTime: "09:45", title: "Theme Activity", description: week.activities[0]?.title || "Themed learning activity", category: "theme" },
+    { id: "block-outdoor", startTime: "09:45", endTime: "10:30", title: "Outdoor Play", description: "Gross motor development, nature exploration", category: "gross-motor" },
+    { id: "block-transition-1", startTime: "10:30", endTime: "10:45", title: "Diaper/Bathroom & Wash", description: "Individual care routines", category: "transition" },
+    { id: "block-lunch", startTime: "10:45", endTime: "11:15", title: "Lunch", description: "Family-style dining, social skills", category: "routine" },
+    { id: "block-nap", startTime: "11:15", endTime: "12:45", title: "Quiet Time / Nap", description: "Rest, books, or calm activities by age", category: "routine" },
+    { id: "block-transition-2", startTime: "12:45", endTime: "13:00", title: "Wake & Transition", description: "Gentle wake-up, diaper changes", category: "transition" },
+    { id: "block-snack-2", startTime: "13:00", endTime: "13:15", title: "Afternoon Snack", description: "Light snack and hydration", category: "routine" },
+    { id: "block-sensory", startTime: "13:15", endTime: "13:45", title: "Sensory Exploration", description: week.activities[2]?.title || "Sensory-rich themed activity", category: "sensory" },
+    { id: "block-freeplay-2", startTime: "13:45", endTime: "14:45", title: "Free Play & Centers", description: "Self-directed exploration with theme materials", category: "free-play" },
+    { id: "block-closing", startTime: "14:45", endTime: "14:55", title: "Closing Circle", description: week.circleTime.goodbyeSong.title, category: "circle" },
+    { id: "block-departure", startTime: "14:55", endTime: "15:00", title: "Departure & Family Updates", description: "Share daily highlights with families", category: "transition" },
+  ];
+}
 
 function extractAllMaterials(plan: WeekPlan): string[] {
   const allMaterials = plan.activities.flatMap((a) => a.materials);
@@ -53,6 +91,7 @@ export default function WeekPlanScreen() {
   const [downloading, setDownloading] = useState(false);
   const pagerRef = useRef<PagerView>(null);
   const chatSheetRef = useRef<ChatAssistantRef>(null);
+  const { getSchedule, initializeSchedule } = useSchedule();
 
   useFocusEffect(
     useCallback(() => {
@@ -74,6 +113,16 @@ export default function WeekPlanScreen() {
       return () => { cancelled = true; };
     }, [id])
   );
+
+  // Initialize the timed schedule when plan loads
+  useEffect(() => {
+    if (!plan) return;
+    const weekId = `week-${plan.weekNumber}`;
+    const existing = getSchedule(weekId);
+    if (existing.length === 0) {
+      initializeSchedule(weekId, getDefaultSchedule(plan));
+    }
+  }, [plan]);
 
   const handleDownloadPDF = async () => {
     if (!id) return;
@@ -102,6 +151,8 @@ export default function WeekPlanScreen() {
     () => (plan ? extractAllMaterials(plan) : []),
     [plan]
   );
+
+  const schedule = plan ? getSchedule(`week-${plan.weekNumber}`) : [];
 
   if (loading) {
     return (
@@ -159,43 +210,90 @@ export default function WeekPlanScreen() {
         )}
       </View>
 
-      {/* Section pill tabs */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 10, gap: 8 }}
-      >
-        {SECTION_TABS.map((tab) => (
-          <Pressable
-            key={tab.key}
-            onPress={() => setActiveSection(tab.key)}
-            className={`flex-row items-center px-3.5 py-2 rounded-full ${
-              activeSection === tab.key
-                ? "bg-primary"
-                : "bg-muted"
-            }`}
-          >
-            <Ionicons
-              name={tab.icon}
-              size={14}
-              color={activeSection === tab.key ? "#fff" : "#5C6B5E"}
-              style={{ marginRight: 5 }}
-            />
-            <Text
-              className={`text-xs font-medium ${
+      {/* Section tabs — text-only, consistent sizing like web app */}
+      <View className="border-b border-border">
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 12, gap: 4, paddingVertical: 8 }}
+        >
+          {SECTION_TABS.map((tab) => (
+            <Pressable
+              key={tab.key}
+              onPress={() => setActiveSection(tab.key)}
+              style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 }}
+              className={
                 activeSection === tab.key
-                  ? "text-primary-foreground"
-                  : "text-muted-foreground"
-              }`}
+                  ? "bg-primary"
+                  : "bg-transparent"
+              }
             >
-              {tab.label}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+              <Text
+                className={`text-sm font-medium ${
+                  activeSection === tab.key
+                    ? "text-primary-foreground"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {tab.label}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
 
-      {/* ── Daily Schedule Section ── */}
+      {/* ── Timed Daily Schedule Section ── */}
       {activeSection === "schedule" && (
+        <ScrollView
+          contentContainerClassName="p-4 pb-8"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text className="text-lg font-semibold text-foreground mb-1">
+            Daily Flow
+          </Text>
+          <Text className="text-xs text-muted-foreground mb-4">
+            {schedule.length} activities • Read-only on mobile
+          </Text>
+
+          {schedule.map((block) => {
+            const colors = CATEGORY_COLORS[block.category] || CATEGORY_COLORS.routine;
+            const duration = calculateDuration(block.startTime, block.endTime);
+            return (
+              <View
+                key={block.id}
+                className="rounded-xl overflow-hidden mb-3"
+                style={{ borderLeftWidth: 4, borderLeftColor: colors.border, backgroundColor: colors.bg }}
+              >
+                <View className="p-4">
+                  <View className="flex-row items-start justify-between mb-1">
+                    <View className="flex-1 mr-3">
+                      <View className="flex-row items-center gap-2 mb-1">
+                        <Ionicons name="time-outline" size={12} color="#9CA3AF" />
+                        <Text className="text-xs text-muted-foreground">
+                          {formatTime12Hour(block.startTime)} – {formatTime12Hour(block.endTime)}
+                        </Text>
+                      </View>
+                      <Text className="text-sm font-medium text-foreground">{block.title}</Text>
+                    </View>
+                    <View
+                      className="rounded-md px-2 py-0.5"
+                      style={{ backgroundColor: "white" }}
+                    >
+                      <Text style={{ color: colors.border, fontSize: 11, fontWeight: "600" }}>
+                        {`${duration}m`}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text className="text-xs text-muted-foreground mt-1">{block.description}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
+      )}
+
+      {/* ── Activities Section (Mon-Fri PagerView) ── */}
+      {activeSection === "activities" && (
         <>
           <View className="flex-row border-b border-border">
             {DAYS.map((day, i) => (
@@ -232,7 +330,7 @@ export default function WeekPlanScreen() {
                 contentContainerClassName="p-4 pb-8"
                 showsVerticalScrollIndicator={false}
               >
-                <Text className="text-lg font-semibold text-foreground mb-3">
+                <Text className="text-lg font-semibold text-foreground mb-4">
                   {day}
                 </Text>
 
@@ -242,41 +340,42 @@ export default function WeekPlanScreen() {
                   </Text>
                 ) : (
                   activitiesByDay[dayIndex].map((activity, i) => (
-                    <Card key={`${day}-${i}`} className="mb-3">
+                    <Card key={`${day}-${i}`} className="mb-4">
                       <CardContent>
-                        <View className="flex-row items-center justify-between mb-1">
-                          <Text className="text-base font-semibold text-foreground flex-shrink">
+                        <View className="flex-row items-center justify-between mb-2">
+                          <Text className="text-base font-semibold text-foreground flex-1 mr-2">
                             {activity.title}
                           </Text>
                           <Badge variant="outline">{activity.domain}</Badge>
                         </View>
 
-                        <Text className="text-sm text-muted-foreground mt-2">
+                        <Text className="text-sm text-muted-foreground leading-5 mt-1">
                           {activity.description}
                         </Text>
 
                         {activity.materials.length > 0 && (
-                          <View className="mt-3">
-                            <Text className="text-xs font-medium text-foreground mb-1">
+                          <View className="mt-4">
+                            <Text className="text-xs font-semibold text-foreground mb-1 uppercase tracking-wide">
                               Materials
                             </Text>
-                            <Text className="text-xs text-muted-foreground">
+                            <Text className="text-xs text-muted-foreground leading-4">
                               {activity.materials.join(", ")}
                             </Text>
                           </View>
                         )}
 
                         {activity.adaptations.length > 0 && (
-                          <View className="mt-3">
-                            <Text className="text-xs font-medium text-foreground mb-1">
+                          <View className="mt-4">
+                            <Text className="text-xs font-semibold text-foreground mb-1 uppercase tracking-wide">
                               Adaptations
                             </Text>
                             {activity.adaptations.map((adapt, j) => (
                               <Text
                                 key={j}
-                                className="text-xs text-muted-foreground mb-0.5"
+                                className="text-xs text-muted-foreground mb-1 leading-4"
                               >
-                                {adapt.age}: {adapt.content}
+                                <Text className="font-medium text-foreground">{adapt.age}:</Text>{" "}
+                                {adapt.content}
                               </Text>
                             ))}
                           </View>
@@ -326,46 +425,42 @@ export default function WeekPlanScreen() {
           contentContainerClassName="p-4 pb-8"
           showsVerticalScrollIndicator={false}
         >
-          <Text className="text-lg font-semibold text-foreground mb-4">
-            Circle Time
-          </Text>
-
           {/* Basics */}
-          <Card className="mb-3">
+          <Card className="mb-4">
             <CardHeader>
               <CardTitle>
                 <View className="flex-row items-center">
                   <Ionicons name="book" size={16} color="#387F39" style={{ marginRight: 8 }} />
-                  <Text className="text-base font-semibold text-foreground">Basics</Text>
+                  <Text className="text-base font-semibold text-foreground">This Week's Focus</Text>
                 </View>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <View className="flex-row flex-wrap gap-3">
-                <View className="items-center">
-                  <Text className="text-2xl font-bold text-primary">{plan.circleTime.letter}</Text>
-                  <Text className="text-xs text-muted-foreground">Letter</Text>
+              <View className="flex-row justify-around">
+                <View className="items-center px-2">
+                  <Text className="text-3xl font-bold text-primary">{plan.circleTime.letter}</Text>
+                  <Text className="text-xs text-muted-foreground mt-1">Letter</Text>
                   {plan.circleTime.letterWord && (
                     <Text className="text-xs text-muted-foreground">({plan.circleTime.letterWord})</Text>
                   )}
                 </View>
-                <View className="items-center">
-                  <Text className="text-2xl font-bold text-primary">{plan.circleTime.shape}</Text>
-                  <Text className="text-xs text-muted-foreground">Shape</Text>
+                <View className="items-center px-2">
+                  <Text className="text-3xl font-bold text-primary">{plan.circleTime.shape}</Text>
+                  <Text className="text-xs text-muted-foreground mt-1">Shape</Text>
                 </View>
-                <View className="items-center">
+                <View className="items-center px-2">
                   <View
-                    className="w-8 h-8 rounded-full mb-0.5"
+                    className="w-10 h-10 rounded-full"
                     style={{ backgroundColor: plan.circleTime.color.toLowerCase() }}
                   />
-                  <Text className="text-xs text-muted-foreground">{plan.circleTime.color}</Text>
+                  <Text className="text-xs text-muted-foreground mt-1">{plan.circleTime.color}</Text>
                   {plan.circleTime.colorObject && (
                     <Text className="text-xs text-muted-foreground">({plan.circleTime.colorObject})</Text>
                   )}
                 </View>
-                <View className="items-center">
-                  <Text className="text-2xl font-bold text-primary">{plan.circleTime.countingTo}</Text>
-                  <Text className="text-xs text-muted-foreground">Count to</Text>
+                <View className="items-center px-2">
+                  <Text className="text-3xl font-bold text-primary">{plan.circleTime.countingTo}</Text>
+                  <Text className="text-xs text-muted-foreground mt-1">Count to</Text>
                   {plan.circleTime.countingObject && (
                     <Text className="text-xs text-muted-foreground">({plan.circleTime.countingObject})</Text>
                   )}
@@ -374,103 +469,152 @@ export default function WeekPlanScreen() {
             </CardContent>
           </Card>
 
-          {/* Songs */}
-          <Card className="mb-3">
-            <CardHeader>
-              <CardTitle>
-                <View className="flex-row items-center">
-                  <Ionicons name="musical-notes" size={16} color="#387F39" style={{ marginRight: 8 }} />
-                  <Text className="text-base font-semibold text-foreground">Songs</Text>
-                </View>
-              </CardTitle>
-            </CardHeader>
+          {/* Greeting Song */}
+          <Card className="mb-4">
             <CardContent>
-              <View className="mb-3">
-                <Text className="text-sm font-medium text-foreground">Greeting Song</Text>
-                <Text className="text-sm text-primary mt-0.5">{plan.circleTime.greetingSong.title}</Text>
-                <Text className="text-xs text-muted-foreground mt-1">{plan.circleTime.greetingSong.script}</Text>
+              <View className="flex-row items-center mb-3">
+                <Ionicons name="musical-notes" size={16} color="#387F39" style={{ marginRight: 8 }} />
+                <Text className="text-sm font-semibold text-foreground">Greeting Song</Text>
               </View>
-              <View className="border-t border-border pt-3">
-                <Text className="text-sm font-medium text-foreground">Goodbye Song</Text>
-                <Text className="text-sm text-primary mt-0.5">{plan.circleTime.goodbyeSong.title}</Text>
-                <Text className="text-xs text-muted-foreground mt-1">{plan.circleTime.goodbyeSong.script}</Text>
+              <Text className="text-base font-medium text-primary mb-2">{plan.circleTime.greetingSong.title}</Text>
+              {plan.circleTime.greetingSong.videoUrl ? (
+                <Pressable
+                  onPress={() => Linking.openURL(plan.circleTime.greetingSong.videoUrl)}
+                  className="mb-3"
+                >
+                  <View className="bg-muted rounded-lg p-3 flex-row items-center">
+                    <Ionicons name="play-circle" size={24} color="#387F39" style={{ marginRight: 10 }} />
+                    <Text className="text-xs text-primary font-medium flex-1">Watch on YouTube</Text>
+                    <Ionicons name="open-outline" size={14} color="#387F39" />
+                  </View>
+                </Pressable>
+              ) : null}
+              <Text className="text-xs text-muted-foreground leading-5">{plan.circleTime.greetingSong.script}</Text>
+            </CardContent>
+          </Card>
+
+          {/* Goodbye Song */}
+          <Card className="mb-4">
+            <CardContent>
+              <View className="flex-row items-center mb-3">
+                <Ionicons name="hand-left" size={16} color="#387F39" style={{ marginRight: 8 }} />
+                <Text className="text-sm font-semibold text-foreground">Goodbye Song</Text>
               </View>
+              <Text className="text-base font-medium text-primary mb-2">{plan.circleTime.goodbyeSong.title}</Text>
+              {plan.circleTime.goodbyeSong.videoUrl ? (
+                <Pressable
+                  onPress={() => Linking.openURL(plan.circleTime.goodbyeSong.videoUrl)}
+                  className="mb-3"
+                >
+                  <View className="bg-muted rounded-lg p-3 flex-row items-center">
+                    <Ionicons name="play-circle" size={24} color="#387F39" style={{ marginRight: 10 }} />
+                    <Text className="text-xs text-primary font-medium flex-1">Watch on YouTube</Text>
+                    <Ionicons name="open-outline" size={14} color="#387F39" />
+                  </View>
+                </Pressable>
+              ) : null}
+              <Text className="text-xs text-muted-foreground leading-5">{plan.circleTime.goodbyeSong.script}</Text>
             </CardContent>
           </Card>
 
           {/* Yoga Poses */}
           {plan.circleTime.yogaPoses.length > 0 && (
-            <Card className="mb-3">
-              <CardHeader>
-                <CardTitle>
-                  <View className="flex-row items-center">
-                    <Ionicons name="body" size={16} color="#387F39" style={{ marginRight: 8 }} />
-                    <Text className="text-base font-semibold text-foreground">Yoga Poses</Text>
-                  </View>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {plan.circleTime.yogaPoses.map((pose) => (
-                  <View key={pose.id} className="mb-3 last:mb-0">
-                    <Text className="text-sm font-medium text-foreground">{pose.name}</Text>
+            <>
+              <View className="flex-row items-center mb-3 mt-2">
+                <Ionicons name="body" size={18} color="#387F39" style={{ marginRight: 8 }} />
+                <Text className="text-base font-semibold text-foreground">Yoga Poses</Text>
+              </View>
+              {plan.circleTime.yogaPoses.map((pose) => (
+                <Card key={pose.id} className="mb-4">
+                  <CardContent>
+                    {pose.imageUrl ? (
+                      <Image
+                        source={{ uri: pose.imageUrl }}
+                        className="w-full rounded-lg mb-3"
+                        style={{ height: 160 }}
+                        resizeMode="cover"
+                      />
+                    ) : null}
+                    <Text className="text-base font-medium text-foreground mb-2">{pose.name}</Text>
                     {pose.howTo && pose.howTo.length > 0 && (
-                      <View className="mt-1">
+                      <View className="mb-2">
                         {pose.howTo.map((step, i) => (
-                          <Text key={i} className="text-xs text-muted-foreground">
-                            {i + 1}. {step}
+                          <Text key={i} className="text-sm text-muted-foreground leading-5 mb-1">
+                            {`${i + 1}. ${step}`}
                           </Text>
                         ))}
                       </View>
                     )}
                     {pose.creativeCues && pose.creativeCues.length > 0 && (
-                      <View className="mt-1">
+                      <View className="mt-2 bg-muted/50 rounded-lg p-3">
                         {pose.creativeCues.map((cue, i) => (
-                          <Text key={i} className="text-xs text-primary italic">
-                            "{cue}"
+                          <Text key={i} className="text-sm text-primary italic leading-5">
+                            {`"${cue}"`}
                           </Text>
                         ))}
                       </View>
                     )}
-                  </View>
-                ))}
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              ))}
+            </>
           )}
 
           {/* Music & Movement */}
           {plan.circleTime.musicMovementVideos.length > 0 && (
-            <Card className="mb-3">
-              <CardHeader>
-                <CardTitle>
-                  <View className="flex-row items-center">
-                    <Ionicons name="videocam" size={16} color="#387F39" style={{ marginRight: 8 }} />
-                    <Text className="text-base font-semibold text-foreground">Music & Movement</Text>
-                  </View>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {plan.circleTime.musicMovementVideos.map((video) => (
-                  <View key={video.id} className="mb-3 last:mb-0">
-                    <Text className="text-sm font-medium text-foreground">{video.title}</Text>
-                    <View className="flex-row flex-wrap gap-1.5 mt-1">
-                      <Badge variant="outline">{video.energyLevel} Energy</Badge>
+            <>
+              <View className="flex-row items-center mb-3 mt-2">
+                <Ionicons name="videocam" size={18} color="#387F39" style={{ marginRight: 8 }} />
+                <Text className="text-base font-semibold text-foreground">Music & Movement</Text>
+              </View>
+              {plan.circleTime.musicMovementVideos.map((video) => (
+                <Card key={video.id} className="mb-4">
+                  <CardContent>
+                    {video.thumbnail ? (
+                      <Pressable onPress={() => video.videoUrl && Linking.openURL(video.videoUrl)}>
+                        <View className="relative mb-3">
+                          <Image
+                            source={{ uri: video.thumbnail }}
+                            className="w-full rounded-lg"
+                            style={{ height: 180 }}
+                            resizeMode="cover"
+                          />
+                          <View className="absolute inset-0 items-center justify-center">
+                            <View className="bg-black/50 rounded-full w-12 h-12 items-center justify-center">
+                              <Ionicons name="play" size={24} color="#fff" />
+                            </View>
+                          </View>
+                        </View>
+                      </Pressable>
+                    ) : video.videoUrl ? (
+                      <Pressable onPress={() => Linking.openURL(video.videoUrl)} className="mb-3">
+                        <View className="bg-muted rounded-lg p-3 flex-row items-center">
+                          <Ionicons name="play-circle" size={24} color="#387F39" style={{ marginRight: 10 }} />
+                          <Text className="text-xs text-primary font-medium flex-1">Watch on YouTube</Text>
+                          <Ionicons name="open-outline" size={14} color="#387F39" />
+                        </View>
+                      </Pressable>
+                    ) : null}
+                    <Text className="text-base font-medium text-foreground mb-2">{video.title}</Text>
+                    <View className="flex-row flex-wrap gap-2 mb-3">
+                      <Badge variant="outline">{`${video.energyLevel} Energy`}</Badge>
                       <Badge variant="outline">{video.duration}</Badge>
-                      {video.educator && <Badge variant="secondary">{video.educator}</Badge>}
+                      {video.educator ? <Badge variant="secondary">{video.educator}</Badge> : null}
                     </View>
                     {video.guidance.howToConduct.steps.length > 0 && (
-                      <View className="mt-2">
-                        <Text className="text-xs font-medium text-foreground mb-0.5">How to conduct</Text>
+                      <View className="mt-1">
+                        <Text className="text-xs font-semibold text-foreground mb-1 uppercase tracking-wide">How to conduct</Text>
                         {video.guidance.howToConduct.steps.map((step, i) => (
-                          <Text key={i} className="text-xs text-muted-foreground">
-                            {i + 1}. {step}
+                          <Text key={i} className="text-sm text-muted-foreground leading-5 mb-1">
+                            {`${i + 1}. ${step}`}
                           </Text>
                         ))}
                       </View>
                     )}
-                  </View>
-                ))}
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              ))}
+            </>
           )}
         </ScrollView>
       )}
@@ -523,55 +667,75 @@ export default function WeekPlanScreen() {
           contentContainerClassName="p-4 pb-8"
           showsVerticalScrollIndicator={false}
         >
-          <Text className="text-lg font-semibold text-foreground mb-3">
-            Newsletter
-          </Text>
-
-          {/* Style toggle */}
-          <View className="flex-row mb-4 rounded-lg overflow-hidden border border-border">
-            <Pressable
-              onPress={() => setNewsletterStyle("professional")}
-              className={`flex-1 items-center py-2.5 ${
-                newsletterStyle === "professional" ? "bg-primary" : "bg-muted"
-              }`}
-            >
-              <Text
-                className={`text-sm font-medium ${
-                  newsletterStyle === "professional"
-                    ? "text-primary-foreground"
-                    : "text-muted-foreground"
-                }`}
-              >
-                Professional
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setNewsletterStyle("warm")}
-              className={`flex-1 items-center py-2.5 ${
-                newsletterStyle === "warm" ? "bg-primary" : "bg-muted"
-              }`}
-            >
-              <Text
-                className={`text-sm font-medium ${
-                  newsletterStyle === "warm"
-                    ? "text-primary-foreground"
-                    : "text-muted-foreground"
-                }`}
-              >
-                Warm & Friendly
-              </Text>
-            </Pressable>
-          </View>
-
-          <Card>
+          {/* Tone toggle */}
+          <Card className="mb-4">
             <CardContent>
+              <View className="flex-row items-center justify-between">
+                <Text className="text-sm font-medium text-foreground">Newsletter Tone</Text>
+                <View className="flex-row rounded-lg overflow-hidden border border-border">
+                  <Pressable
+                    onPress={() => setNewsletterStyle("professional")}
+                    style={{ paddingHorizontal: 14, paddingVertical: 8 }}
+                    className={newsletterStyle === "professional" ? "bg-primary" : "bg-muted"}
+                  >
+                    <Text
+                      className={`text-xs font-medium ${
+                        newsletterStyle === "professional"
+                          ? "text-primary-foreground"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      Professional
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setNewsletterStyle("warm")}
+                    style={{ paddingHorizontal: 14, paddingVertical: 8 }}
+                    className={newsletterStyle === "warm" ? "bg-primary" : "bg-muted"}
+                  >
+                    <Text
+                      className={`text-xs font-medium ${
+                        newsletterStyle === "warm"
+                          ? "text-primary-foreground"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      Warm
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </CardContent>
+          </Card>
+
+          {/* Newsletter content with gradient header */}
+          <View className="rounded-xl overflow-hidden border border-border">
+            <View className="bg-primary p-5">
+              <Text className="text-lg font-semibold text-primary-foreground">
+                {`${plan.theme} Week`}
+              </Text>
+              <Text className="text-xs text-primary-foreground mt-1" style={{ opacity: 0.85 }}>
+                {`Week ${plan.weekNumber} \u2022 ${plan.weekRange}`}
+              </Text>
+            </View>
+            <View className="p-5 bg-card">
               <Text className="text-sm text-foreground leading-6">
                 {newsletterStyle === "professional"
                   ? plan.newsletter.professional
                   : plan.newsletter.warm}
               </Text>
-            </CardContent>
-          </Card>
+            </View>
+            {plan.domains.length > 0 && (
+              <View className="border-t border-border p-4 bg-card">
+                <Text className="text-xs text-muted-foreground mb-2">Focus Areas This Week:</Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {plan.domains.map((domain) => (
+                    <Badge key={domain} variant="secondary">{domain}</Badge>
+                  ))}
+                </View>
+              </View>
+            )}
+          </View>
         </ScrollView>
       )}
 

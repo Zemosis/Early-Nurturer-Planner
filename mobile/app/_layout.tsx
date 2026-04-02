@@ -8,6 +8,7 @@ import {
   configureApi,
   PlannerProvider,
   ThemeProvider,
+  ScheduleProvider,
   type StorageProvider,
 } from "shared";
 
@@ -65,7 +66,9 @@ export default function RootLayout() {
       <StatusBar style="dark" />
       <PlannerProvider storageProvider={storageProvider}>
         <ThemeProvider>
-          <Stack screenOptions={{ headerShown: false }} />
+          <ScheduleProvider>
+            <Stack screenOptions={{ headerShown: false }} />
+          </ScheduleProvider>
         </ThemeProvider>
       </PlannerProvider>
     </>

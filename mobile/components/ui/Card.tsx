@@ -23,11 +23,14 @@ export function CardHeader({ children, className = "" }: CardProps) {
 }
 
 export function CardTitle({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return (
-    <Text className={`text-lg font-semibold text-card-foreground ${className}`}>
-      {typeof children === "string" ? children : ""}
-    </Text>
-  );
+  if (typeof children === "string") {
+    return (
+      <Text className={`text-lg font-semibold text-card-foreground ${className}`}>
+        {children}
+      </Text>
+    );
+  }
+  return <View className={className}>{children}</View>;
 }
 
 export function CardDescription({ children, className = "" }: { children: ReactNode; className?: string }) {
