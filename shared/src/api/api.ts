@@ -11,6 +11,10 @@ let apiBase = "";
 export function configureApi(baseURL: string) {
   apiBase = baseURL;
 }
+
+export function getApiBase(): string {
+  return apiBase;
+}
 export const DEFAULT_USER_ID = "83b58b5f-698b-4ae1-9529-f83d97641f01";
 
 // ── Theme Pool ──────────────────────────────────────────────
