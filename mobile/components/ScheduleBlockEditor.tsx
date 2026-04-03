@@ -82,10 +82,10 @@ export function ScheduleBlockEditor({
         className="flex-1"
       >
         <Pressable
-          className="flex-1 bg-black/40"
+          className="flex-1 bg-black/60"
           onPress={onClose}
         />
-        <View className="bg-card rounded-t-3xl" style={{ maxHeight: "85%" }}>
+        <View className="rounded-t-3xl" style={{ maxHeight: "85%", backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E5E7EB", borderBottomWidth: 0, shadowColor: "#000", shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 16 }}>
           {/* Header */}
           <View className="flex-row items-center justify-between px-5 pt-5 pb-3 border-b border-border">
             <Pressable onPress={onClose}>
@@ -112,7 +112,7 @@ export function ScheduleBlockEditor({
               placeholder="Block title"
               className="rounded-xl px-4 py-3 text-sm text-foreground mb-4"
               placeholderTextColor="#9CA3AF"
-              style={{ borderWidth: 1.5, borderColor: "#D1D5DB" }}
+              style={{ borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
             />
 
             {/* Description */}
@@ -127,7 +127,7 @@ export function ScheduleBlockEditor({
               numberOfLines={3}
               className="rounded-xl px-4 py-3 text-sm text-foreground mb-4"
               placeholderTextColor="#9CA3AF"
-              style={{ textAlignVertical: "top", minHeight: 72, borderWidth: 1.5, borderColor: "#D1D5DB" }}
+              style={{ textAlignVertical: "top", minHeight: 72, borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
             />
 
             {/* Time Row */}
@@ -142,7 +142,7 @@ export function ScheduleBlockEditor({
                   placeholder="08:00"
                   className="rounded-xl px-4 py-3 text-sm text-foreground"
                   placeholderTextColor="#9CA3AF"
-                  style={{ borderWidth: 1.5, borderColor: "#D1D5DB" }}
+                  style={{ borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
                 />
               </View>
               <View className="flex-1">
@@ -155,7 +155,7 @@ export function ScheduleBlockEditor({
                   placeholder="08:30"
                   className="rounded-xl px-4 py-3 text-sm text-foreground"
                   placeholderTextColor="#9CA3AF"
-                  style={{ borderWidth: 1.5, borderColor: "#D1D5DB" }}
+                  style={{ borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
                 />
               </View>
             </View>

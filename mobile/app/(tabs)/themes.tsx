@@ -9,6 +9,7 @@ import {
   Modal,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import {
   usePlanner,
   fetchThemePool,
@@ -35,6 +36,8 @@ export default function ThemesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedForReplace, setSelectedForReplace] = useState<Set<string>>(new Set());
 
   const loadPool = useCallback(async () => {
     try {
@@ -52,11 +55,38 @@ export default function ThemesScreen() {
     loadPool();
   }, [loadPool]);
 
-  const handleRefresh = async () => {
+  const enterSelectMode = () => {
+    setSelectedForReplace(new Set());
+    setSelectMode(true);
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedForReplace(new Set());
+  };
+
+  const toggleSelection = (id: string) => {
+    setSelectedForReplace((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleConfirmRefresh = async () => {
+    if (selectedForReplace.size === 0) {
+      Alert.alert("No themes selected", "Select at least one theme to replace.");
+      return;
+    }
     setRefreshing(true);
     try {
-      const response = await refreshThemePool([]);
+      const keepIds = themePool
+        .filter((t) => !selectedForReplace.has(t.id))
+        .map((t) => t.id);
+      const response = await refreshThemePool(keepIds);
       setThemePool(response.themes);
+      exitSelectMode();
     } catch {
       Alert.alert("Error", "Failed to refresh themes.");
     } finally {
@@ -65,6 +95,10 @@ export default function ThemesScreen() {
   };
 
   const handleSelectTheme = (item: ThemePoolItem) => {
+    if (selectMode) {
+      toggleSelection(item.id);
+      return;
+    }
     const theme = transformApiThemeToThemeDetail(item.theme_data);
     Alert.alert(
       `Generate Plan: ${theme.emoji} ${theme.name}`,
@@ -107,10 +141,21 @@ export default function ThemesScreen() {
 
   const renderThemeCard = ({ item }: { item: ThemePoolItem }) => {
     const theme = transformApiThemeToThemeDetail(item.theme_data);
+    const isSelected = selectedForReplace.has(item.id);
     return (
       <Pressable onPress={() => handleSelectTheme(item)}>
-        <Card className="mb-3">
-          <CardHeader>
+        <View style={selectMode && isSelected ? { borderWidth: 2, borderColor: "#EF4444", borderRadius: 14, overflow: "hidden" } : undefined}>
+          <Card className="mb-3">
+            {selectMode && (
+              <View style={{ position: "absolute", top: 12, right: 12, zIndex: 10 }}>
+                <Ionicons
+                  name={isSelected ? "checkmark-circle" : "ellipse-outline"}
+                  size={24}
+                  color={isSelected ? "#EF4444" : "#D1D5DB"}
+                />
+              </View>
+            )}
+            <CardHeader>
             <CardTitle>{`${theme.emoji} ${theme.name}`}</CardTitle>
           </CardHeader>
           <CardContent>
@@ -140,7 +185,8 @@ export default function ThemesScreen() {
               </View>
             )}
           </CardContent>
-        </Card>
+          </Card>
+        </View>
       </Pressable>
     );
   };
@@ -182,21 +228,26 @@ export default function ThemesScreen() {
         </View>
       </Modal>
 
-      <View className="px-4 pt-14 pb-3 flex-row items-end justify-between">
+      <View className="px-4 pt-2 pb-3 flex-row items-end justify-between">
         <View>
           <Text className="text-2xl font-bold text-foreground">Theme Pool</Text>
           <Text className="text-sm text-muted-foreground mt-1">
-            Tap a theme to generate a weekly plan
+            {selectMode ? "Select themes to replace" : "Tap a theme to generate a weekly plan"}
           </Text>
         </View>
-        <Button
-          size="sm"
-          variant="outline"
-          loading={refreshing}
-          onPress={handleRefresh}
-        >
-          Refresh
-        </Button>
+        {!selectMode ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onPress={enterSelectMode}
+          >
+            Refresh
+          </Button>
+        ) : (
+          <Pressable onPress={exitSelectMode}>
+            <Text style={{ color: "#9CA3AF", fontSize: 14, fontWeight: "500" }}>Cancel</Text>
+          </Pressable>
+        )}
       </View>
 
       {themePool.length === 0 ? (
@@ -214,9 +265,59 @@ export default function ThemesScreen() {
           data={themePool}
           keyExtractor={(item) => item.id}
           renderItem={renderThemeCard}
-          contentContainerClassName="px-4 pb-6"
+          contentContainerClassName="px-4 pb-24"
           showsVerticalScrollIndicator={false}
         />
+      )}
+
+      {/* Sticky bottom bar in select mode */}
+      {selectMode && (
+        <View
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            backgroundColor: "#FFFFFF",
+            borderTopWidth: 1,
+            borderTopColor: "#E5E7EB",
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            paddingBottom: 28,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 8,
+            elevation: 8,
+          }}
+        >
+          <Text style={{ fontSize: 14, color: "#6B7280" }}>
+            {selectedForReplace.size === 0
+              ? "Tap themes to select"
+              : `${selectedForReplace.size} theme${selectedForReplace.size > 1 ? "s" : ""} selected`}
+          </Text>
+          <Pressable
+            onPress={handleConfirmRefresh}
+            disabled={refreshing || selectedForReplace.size === 0}
+            style={{
+              backgroundColor: selectedForReplace.size > 0 ? "#387F39" : "#D1D5DB",
+              borderRadius: 10,
+              paddingHorizontal: 20,
+              paddingVertical: 10,
+            }}
+          >
+            {refreshing ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={{ color: "#fff", fontSize: 14, fontWeight: "600" }}>
+                {`Replace${selectedForReplace.size > 0 ? ` ${selectedForReplace.size}` : ""} Theme${selectedForReplace.size !== 1 ? "s" : ""}`}
+              </Text>
+            )}
+          </Pressable>
+        </View>
       )}
     </View>
   );
