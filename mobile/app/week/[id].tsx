@@ -607,6 +607,18 @@ export default function WeekPlanScreen() {
               const updated = getSchedule(weekId).filter(b => b.id !== blockId);
               persistSchedule(updated);
             }}
+            onReorder={(blockId, direction) => {
+              const current = getSchedule(weekId);
+              const idx = current.findIndex(b => b.id === blockId);
+              if (idx < 0) return;
+              const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+              if (targetIdx < 0 || targetIdx >= current.length) return;
+              const reordered = [...current];
+              [reordered[idx], reordered[targetIdx]] = [reordered[targetIdx], reordered[idx]];
+              // Reinitialize the schedule context with the new order
+              initializeSchedule(weekId, reordered);
+              persistSchedule(reordered);
+            }}
             onClose={() => { setEditorVisible(false); setEditingBlock(null); }}
           />
         </View>

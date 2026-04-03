@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { ScheduleBlock } from "shared";
 
@@ -28,6 +29,7 @@ interface ScheduleBlockEditorProps {
   block: ScheduleBlock | null;
   onSave: (block: ScheduleBlock) => void;
   onDelete?: (blockId: string) => void;
+  onReorder?: (blockId: string, direction: "up" | "down") => void;
   onClose: () => void;
   themeColor?: string;
 }
@@ -37,9 +39,11 @@ export function ScheduleBlockEditor({
   block,
   onSave,
   onDelete,
+  onReorder,
   onClose,
   themeColor = "#387F39",
 }: ScheduleBlockEditorProps) {
+  const insets = useSafeAreaInsets();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [startTime, setStartTime] = useState("08:00");
@@ -76,47 +80,65 @@ export function ScheduleBlockEditor({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        className="flex-1"
+        style={{ flex: 1 }}
       >
+        {/* Dimmed backdrop */}
         <Pressable
-          className="flex-1 bg-black/60"
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
           onPress={onClose}
         />
-        <View className="rounded-t-3xl" style={{ maxHeight: "85%", backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E5E7EB", borderBottomWidth: 0, shadowColor: "#000", shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 16 }}>
+
+        {/* Sheet content */}
+        <View style={{
+          maxHeight: "85%",
+          backgroundColor: "#FFFFFF",
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.15,
+          shadowRadius: 12,
+          elevation: 16,
+        }}>
+          {/* Handle indicator */}
+          <View style={{ alignItems: "center", paddingTop: 12, paddingBottom: 8 }}>
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: "#D1D5DB" }} />
+          </View>
+
           {/* Header */}
-          <View className="flex-row items-center justify-between px-5 pt-5 pb-3 border-b border-border">
-            <Pressable onPress={onClose}>
-              <Text className="text-sm text-muted-foreground">Cancel</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#E5E7EB" }}>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Text style={{ fontSize: 14, color: "#9CA3AF" }}>Cancel</Text>
             </Pressable>
-            <Text className="text-base font-semibold text-foreground">
+            <Text style={{ fontSize: 16, fontWeight: "600", color: "#1F2937" }}>
               {block ? "Edit Block" : "New Block"}
             </Text>
-            <Pressable onPress={handleSave}>
-              <Text className="text-sm font-semibold" style={{ color: themeColor }}>
-                Save
-              </Text>
+            <Pressable onPress={handleSave} hitSlop={8}>
+              <Text style={{ fontSize: 14, fontWeight: "600", color: themeColor }}>Save</Text>
             </Pressable>
           </View>
 
-          <ScrollView className="px-5 py-4" showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: insets.bottom + 16 }}
+            showsVerticalScrollIndicator={false}
+          >
             {/* Title */}
-            <Text className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">
+            <Text style={{ fontSize: 11, fontWeight: "600", color: "#9CA3AF", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
               Title
             </Text>
             <TextInput
               value={title}
               onChangeText={setTitle}
               placeholder="Block title"
-              className="rounded-xl px-4 py-3 text-sm text-foreground mb-4"
               placeholderTextColor="#9CA3AF"
-              style={{ borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
+              style={{ borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 14, color: "#1F2937", marginBottom: 16, borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
             />
 
             {/* Description */}
-            <Text className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">
+            <Text style={{ fontSize: 11, fontWeight: "600", color: "#9CA3AF", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
               Description
             </Text>
             <TextInput
@@ -125,80 +147,97 @@ export function ScheduleBlockEditor({
               placeholder="What happens during this block?"
               multiline
               numberOfLines={3}
-              className="rounded-xl px-4 py-3 text-sm text-foreground mb-4"
               placeholderTextColor="#9CA3AF"
-              style={{ textAlignVertical: "top", minHeight: 72, borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
+              style={{ borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 14, color: "#1F2937", marginBottom: 16, textAlignVertical: "top", minHeight: 72, borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
             />
 
             {/* Time Row */}
-            <View className="flex-row gap-4 mb-4">
-              <View className="flex-1">
-                <Text className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">
+            <View style={{ flexDirection: "row", gap: 16, marginBottom: 16 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11, fontWeight: "600", color: "#9CA3AF", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
                   Start
                 </Text>
                 <TextInput
                   value={startTime}
                   onChangeText={setStartTime}
                   placeholder="08:00"
-                  className="rounded-xl px-4 py-3 text-sm text-foreground"
                   placeholderTextColor="#9CA3AF"
-                  style={{ borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
+                  style={{ borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 14, color: "#1F2937", borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
                 />
               </View>
-              <View className="flex-1">
-                <Text className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11, fontWeight: "600", color: "#9CA3AF", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
                   End
                 </Text>
                 <TextInput
                   value={endTime}
                   onChangeText={setEndTime}
                   placeholder="08:30"
-                  className="rounded-xl px-4 py-3 text-sm text-foreground"
                   placeholderTextColor="#9CA3AF"
-                  style={{ borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
+                  style={{ borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 14, color: "#1F2937", borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
                 />
               </View>
             </View>
 
             {/* Category */}
-            <Text className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
+            <Text style={{ fontSize: 11, fontWeight: "600", color: "#9CA3AF", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
               Category
             </Text>
-            <View className="flex-row flex-wrap gap-2 mb-6">
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 24 }}>
               {CATEGORIES.map((cat) => (
                 <Pressable
                   key={cat.key}
                   onPress={() => setCategory(cat.key as ScheduleBlock["category"])}
-                  className="rounded-lg px-3 py-2 border"
                   style={{
+                    borderRadius: 8,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderWidth: 1.5,
                     borderColor: category === cat.key ? cat.color : "#E5E7EB",
                     backgroundColor: category === cat.key ? cat.color + "15" : "transparent",
                   }}
                 >
-                  <Text
-                    className="text-xs font-medium"
-                    style={{ color: category === cat.key ? cat.color : "#6B7280" }}
-                  >
+                  <Text style={{ fontSize: 12, fontWeight: "500", color: category === cat.key ? cat.color : "#6B7280" }}>
                     {cat.label}
                   </Text>
                 </Pressable>
               ))}
             </View>
 
+            {/* Reorder buttons (only when editing existing block) */}
+            {block && onReorder && (
+              <View style={{ marginBottom: 24 }}>
+                <Text style={{ fontSize: 11, fontWeight: "600", color: "#9CA3AF", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  Reorder
+                </Text>
+                <View style={{ flexDirection: "row", gap: 12 }}>
+                  <Pressable
+                    onPress={() => { onReorder(block.id, "up"); onClose(); }}
+                    style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
+                  >
+                    <Ionicons name="arrow-up" size={16} color="#6B7280" />
+                    <Text style={{ fontSize: 14, fontWeight: "500", color: "#6B7280" }}>Move Up</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => { onReorder(block.id, "down"); onClose(); }}
+                    style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
+                  >
+                    <Ionicons name="arrow-down" size={16} color="#6B7280" />
+                    <Text style={{ fontSize: 14, fontWeight: "500", color: "#6B7280" }}>Move Down</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
             {/* Delete */}
             {block && onDelete && (
               <Pressable
-                onPress={() => {
-                  onDelete(block.id);
-                  onClose();
-                }}
-                className="items-center py-3 rounded-xl border border-red-200 mb-6"
+                onPress={() => { onDelete(block.id); onClose(); }}
+                style={{ alignItems: "center", paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: "#FCA5A5", marginBottom: 24 }}
               >
-                <Text className="text-sm font-medium text-red-500">Delete Block</Text>
+                <Text style={{ fontSize: 14, fontWeight: "500", color: "#EF4444" }}>Delete Block</Text>
               </Pressable>
             )}
-
-            <View style={{ height: 40 }} />
           </ScrollView>
         </View>
       </KeyboardAvoidingView>

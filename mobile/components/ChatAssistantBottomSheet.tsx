@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const SUGGESTIONS = [
   "Make it more sensory",
@@ -25,6 +26,7 @@ export interface ChatAssistantRef {
 const ChatAssistantBottomSheet = forwardRef<ChatAssistantRef>((_props, ref) => {
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState("");
+  const insets = useSafeAreaInsets();
 
   useImperativeHandle(ref, () => ({
     open: () => setVisible(true),
@@ -40,68 +42,90 @@ const ChatAssistantBottomSheet = forwardRef<ChatAssistantRef>((_props, ref) => {
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        className="flex-1"
+        style={{ flex: 1 }}
       >
-        {/* Dismiss backdrop */}
+        {/* Dimmed backdrop */}
         <Pressable
-          className="flex-1"
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
           onPress={() => setVisible(false)}
         />
 
         {/* Sheet content */}
-        <View className="bg-background rounded-t-3xl border-t border-border" style={{ maxHeight: "70%" }}>
-          {/* Handle */}
-          <View className="items-center pt-3 pb-2">
-            <View className="w-10 h-1 rounded-full bg-muted-foreground/30" />
+        <View style={{
+          backgroundColor: "#FFFFFF",
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+          maxHeight: "85%",
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.15,
+          shadowRadius: 12,
+          elevation: 16,
+        }}>
+          {/* Handle indicator */}
+          <View style={{ alignItems: "center", paddingTop: 12, paddingBottom: 8 }}>
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: "#D1D5DB" }} />
           </View>
 
-          <ScrollView className="px-4 pb-4" showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={{ paddingHorizontal: 16 }}
+            contentContainerStyle={{ paddingBottom: 16 }}
+            showsVerticalScrollIndicator={false}
+          >
             {/* Header */}
-            <View className="flex-row items-center justify-between mb-4">
-              <Text className="text-lg font-semibold text-foreground">
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <Text style={{ fontSize: 18, fontWeight: "600", color: "#1F2937" }}>
                 Curriculum Assistant
               </Text>
-              <Pressable onPress={() => setVisible(false)}>
-                <Text className="text-muted-foreground text-base">✕</Text>
+              <Pressable onPress={() => setVisible(false)} hitSlop={8}>
+                <Text style={{ color: "#9CA3AF", fontSize: 16 }}>✕</Text>
               </Pressable>
             </View>
 
             {/* Welcome message */}
-            <View className="bg-secondary/30 rounded-2xl p-4 mb-4">
-              <Text className="text-sm text-foreground">
+            <View style={{ backgroundColor: "#F3F4F6", borderRadius: 16, padding: 16, marginBottom: 16 }}>
+              <Text style={{ fontSize: 14, color: "#1F2937", lineHeight: 20 }}>
                 Hello! I can help you modify activities, regenerate specific days,
                 simplify content, or add extensions. How can I assist you today?
               </Text>
             </View>
 
             {/* Quick suggestions */}
-            <Text className="text-xs text-muted-foreground mb-2">
+            <Text style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>
               Quick suggestions:
             </Text>
-            <View className="gap-2 mb-4">
+            <View style={{ gap: 8, marginBottom: 16 }}>
               {SUGGESTIONS.map((suggestion) => (
                 <Pressable
                   key={suggestion}
                   onPress={() => setMessage(suggestion)}
-                  className="px-4 py-3 bg-secondary/20 rounded-xl"
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, backgroundColor: "#F9FAFB", borderRadius: 12, borderWidth: 1, borderColor: "#E5E7EB" }}
                 >
-                  <Text className="text-sm text-foreground">{suggestion}</Text>
+                  <Text style={{ fontSize: 14, color: "#1F2937" }}>{suggestion}</Text>
                 </Pressable>
               ))}
             </View>
           </ScrollView>
 
-          {/* Input area */}
-          <View className="flex-row gap-2 px-4 pb-6 pt-2 border-t border-border">
+          {/* Input area pinned at bottom */}
+          <View style={{
+            flexDirection: "row",
+            gap: 8,
+            paddingHorizontal: 16,
+            paddingTop: 8,
+            paddingBottom: insets.bottom + 12,
+            borderTopWidth: 1,
+            borderTopColor: "#E5E7EB",
+          }}>
             <TextInput
               value={message}
               onChangeText={setMessage}
               placeholder="Type your request..."
               placeholderTextColor="#9CA3AF"
-              className="flex-1 px-4 py-3 bg-card rounded-xl border border-border text-sm text-foreground"
+              style={{ flex: 1, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: "#F9FAFB", borderRadius: 12, borderWidth: 1, borderColor: "#E5E7EB", fontSize: 14, color: "#1F2937" }}
             />
-            <Pressable className="p-3 bg-primary rounded-xl items-center justify-center opacity-50">
-              <Text className="text-primary-foreground text-sm font-medium">Send</Text>
+            <Pressable style={{ paddingHorizontal: 16, paddingVertical: 12, backgroundColor: "#387F39", borderRadius: 12, alignItems: "center", justifyContent: "center", opacity: 0.5 }}>
+              <Text style={{ color: "#FFFFFF", fontSize: 14, fontWeight: "500" }}>Send</Text>
             </Pressable>
           </View>
         </View>
