@@ -34,7 +34,7 @@ export function ScheduleBlockEditor({
 }: ScheduleBlockEditorProps) {
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const insets = useSafeAreaInsets();
-  const snapPoints = useMemo(() => ["85%", "100%"], []);
+  const snapPoints = useMemo(() => ["75%", "95%"], []);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [startTime, setStartTime] = useState("08:00");
