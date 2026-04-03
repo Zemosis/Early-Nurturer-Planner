@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   configureApi,
@@ -62,15 +64,17 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="dark" />
       <PlannerProvider storageProvider={storageProvider}>
         <ThemeProvider>
           <ScheduleProvider>
-            <Stack screenOptions={{ headerShown: false }} />
+            <BottomSheetModalProvider>
+              <Stack screenOptions={{ headerShown: false }} />
+            </BottomSheetModalProvider>
           </ScheduleProvider>
         </ThemeProvider>
       </PlannerProvider>
-    </>
+    </GestureHandlerRootView>
   );
 }
