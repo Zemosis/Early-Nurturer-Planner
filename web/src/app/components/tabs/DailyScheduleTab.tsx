@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
-import { Clock, Info, Edit2, GripVertical, Lock, Unlock, Plus, Sparkles } from "lucide-react";
-import { WeekPlan, useSchedule, ScheduleBlock, formatTime12Hour, calculateDuration } from 'shared';
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Clock, Info, Edit2, GripVertical, Lock, Unlock, Plus, Sparkles, Loader2 } from "lucide-react";
+import { WeekPlan, useSchedule, ScheduleBlock, formatTime12Hour, calculateDuration, updatePlanSchedule } from 'shared';
 import { ScheduleBlockEditor } from "../ScheduleBlockEditor";
 import { AddActivityModal } from "../AddActivityModal";
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
@@ -314,12 +314,27 @@ function DailyScheduleTabContent({ week }: DailyScheduleTabProps) {
   const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [savingSchedule, setSavingSchedule] = useState(false);
 
-  // Initialize schedule on mount
+  // Persist schedule changes to the backend
+  const persistSchedule = useCallback(async (updatedBlocks: ScheduleBlock[]) => {
+    if (!week.id) return;
+    setSavingSchedule(true);
+    try {
+      await updatePlanSchedule(week.id, { [weekId]: updatedBlocks });
+    } catch (e) {
+      console.warn("Failed to save schedule:", e);
+    } finally {
+      setSavingSchedule(false);
+    }
+  }, [week.id, weekId]);
+
+  // Initialize schedule on mount — prefer persisted data from backend
   useEffect(() => {
     const existingSchedule = getSchedule(weekId);
     if (existingSchedule.length === 0 && !isInitialized) {
-      initializeSchedule(weekId, getDefaultSchedule(week));
+      const persisted = week.schedule?.[weekId];
+      initializeSchedule(weekId, persisted && persisted.length > 0 ? persisted : getDefaultSchedule(week));
       setIsInitialized(true);
     }
   }, [weekId, week, getSchedule, initializeSchedule, isInitialized]);
@@ -329,21 +344,34 @@ function DailyScheduleTabContent({ week }: DailyScheduleTabProps) {
   const handleSaveBlock = (updates: Partial<ScheduleBlock>) => {
     if (editingBlock) {
       updateBlock(weekId, editingBlock.id, updates);
+      const updated = getSchedule(weekId).map(b => b.id === editingBlock.id ? { ...b, ...updates } : b);
+      persistSchedule(updated);
     }
   };
 
   const handleDeleteBlock = () => {
     if (editingBlock) {
       deleteBlock(weekId, editingBlock.id);
+      const updated = getSchedule(weekId).filter(b => b.id !== editingBlock.id);
+      persistSchedule(updated);
     }
   };
 
   const handleAddBlock = (newBlock: Omit<ScheduleBlock, 'id'>) => {
     addBlock(weekId, newBlock);
+    const current = getSchedule(weekId);
+    const withNew = [...current, { ...newBlock, id: `block-${Date.now()}` }]
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+    persistSchedule(withNew);
   };
 
   const handleMoveBlock = (fromIndex: number, toIndex: number) => {
     reorderBlocks(weekId, fromIndex, toIndex);
+    // Build the reordered array and persist
+    const current = [...getSchedule(weekId)];
+    const [moved] = current.splice(fromIndex, 1);
+    current.splice(toIndex, 0, moved);
+    persistSchedule(current);
   };
 
   return (
@@ -388,7 +416,13 @@ function DailyScheduleTabContent({ week }: DailyScheduleTabProps) {
             <span className="text-muted-foreground">Auto-adjust times</span>
           </label>
 
-          <div className="ml-auto text-xs text-muted-foreground">
+          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+            {savingSchedule && (
+              <span className="flex items-center gap-1 text-primary">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Saving…
+              </span>
+            )}
             {schedule.length} activities
           </div>
         </div>
