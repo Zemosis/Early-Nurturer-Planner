@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { View, Text, Pressable, TextInput } from "react-native";
 import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 import type { ScheduleBlock } from "shared";
 
 const CATEGORIES = [
@@ -21,7 +20,6 @@ interface ScheduleBlockEditorProps {
   block: ScheduleBlock | null;
   onSave: (block: ScheduleBlock) => void;
   onDelete?: (blockId: string) => void;
-  onReorder?: (blockId: string, direction: "up" | "down") => void;
   onClose: () => void;
   themeColor?: string;
 }
@@ -31,13 +29,12 @@ export function ScheduleBlockEditor({
   block,
   onSave,
   onDelete,
-  onReorder,
   onClose,
   themeColor = "#387F39",
 }: ScheduleBlockEditorProps) {
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const insets = useSafeAreaInsets();
-  const snapPoints = useMemo(() => ["60%", "95%"], []);
+  const snapPoints = useMemo(() => ["85%", "100%"], []);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [startTime, setStartTime] = useState("08:00");
@@ -200,31 +197,6 @@ export function ScheduleBlockEditor({
             </Pressable>
           ))}
         </View>
-
-        {/* Reorder buttons (only when editing existing block) */}
-        {block && onReorder && (
-          <View style={{ marginBottom: 24 }}>
-            <Text style={{ fontSize: 11, fontWeight: "600", color: "#9CA3AF", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
-              Reorder
-            </Text>
-            <View style={{ flexDirection: "row", gap: 12 }}>
-              <Pressable
-                onPress={() => { onReorder(block.id, "up"); onClose(); }}
-                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
-              >
-                <Ionicons name="arrow-up" size={16} color="#6B7280" />
-                <Text style={{ fontSize: 14, fontWeight: "500", color: "#6B7280" }}>Move Up</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => { onReorder(block.id, "down"); onClose(); }}
-                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: "#D1D5DB", backgroundColor: "#F8F9FA" }}
-              >
-                <Ionicons name="arrow-down" size={16} color="#6B7280" />
-                <Text style={{ fontSize: 14, fontWeight: "500", color: "#6B7280" }}>Move Down</Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
 
         {/* Delete */}
         {block && onDelete && (

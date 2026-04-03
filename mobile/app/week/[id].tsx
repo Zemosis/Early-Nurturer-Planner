@@ -9,7 +9,10 @@ import {
   Image,
   Linking,
   TextInput,
+  Animated as RNAnimated,
 } from "react-native";
+import DraggableFlatList, { type RenderItemParams, ScaleDecorator } from "react-native-draggable-flatlist";
+import { Swipeable } from "react-native-gesture-handler";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import PagerView from "react-native-pager-view";
 import * as FileSystem from "expo-file-system/legacy";
@@ -502,41 +505,82 @@ export default function WeekPlanScreen() {
       {/* ── Timed Daily Schedule Section (Editable) ── */}
       {activeSection === "schedule" && (
         <View style={{ flex: 1 }}>
-          <ScrollView
-            contentContainerClassName="p-4 pb-8"
-            showsVerticalScrollIndicator={false}
-          >
-            <View className="flex-row items-center justify-between mb-4">
-              <View>
-                <Text className="text-lg font-semibold text-foreground">Daily Flow</Text>
-                <View className="flex-row items-center gap-2">
-                  <Text className="text-xs text-muted-foreground">{`${schedule.length} blocks`}</Text>
-                  {savingSchedule && (
-                    <View className="flex-row items-center gap-1">
-                      <ActivityIndicator size="small" color={tc.primary} />
-                      <Text className="text-xs" style={{ color: tc.primary }}>Saving…</Text>
-                    </View>
-                  )}
+          <DraggableFlatList
+            data={schedule}
+            keyExtractor={(item) => item.id}
+            activationDistance={isLocked ? 999 : 10}
+            onDragEnd={({ data }) => {
+              initializeSchedule(weekId, data);
+              persistSchedule(data);
+            }}
+            ListHeaderComponent={
+              <View className="flex-row items-center justify-between mb-4">
+                <View>
+                  <Text className="text-lg font-semibold text-foreground">Daily Flow</Text>
+                  <View className="flex-row items-center gap-2">
+                    <Text className="text-xs text-muted-foreground">{`${schedule.length} blocks`}</Text>
+                    {savingSchedule && (
+                      <View className="flex-row items-center gap-1">
+                        <ActivityIndicator size="small" color={tc.primary} />
+                        <Text className="text-xs" style={{ color: tc.primary }}>Saving…</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
+                <Pressable
+                  onPress={toggleLock}
+                  className="flex-row items-center gap-1.5 rounded-lg px-3 py-2 border"
+                  style={{ borderColor: isLocked ? "#D1D5DB" : tc.primary, backgroundColor: isLocked ? "transparent" : tc.primary + "10" }}
+                >
+                  <Ionicons name={isLocked ? "lock-closed" : "lock-open"} size={14} color={isLocked ? "#9CA3AF" : tc.primary} />
+                  <Text style={{ fontSize: 12, fontWeight: "500", color: isLocked ? "#9CA3AF" : tc.primary }}>
+                    {isLocked ? "Locked" : "Editing"}
+                  </Text>
+                </Pressable>
               </View>
-              <Pressable
-                onPress={toggleLock}
-                className="flex-row items-center gap-1.5 rounded-lg px-3 py-2 border"
-                style={{ borderColor: isLocked ? "#D1D5DB" : tc.primary, backgroundColor: isLocked ? "transparent" : tc.primary + "10" }}
-              >
-                <Ionicons name={isLocked ? "lock-closed" : "lock-open"} size={14} color={isLocked ? "#9CA3AF" : tc.primary} />
-                <Text style={{ fontSize: 12, fontWeight: "500", color: isLocked ? "#9CA3AF" : tc.primary }}>
-                  {isLocked ? "Locked" : "Editing"}
-                </Text>
-              </Pressable>
-            </View>
-
-            {schedule.map((block) => {
+            }
+            ListFooterComponent={
+              !isLocked ? (
+                <Pressable
+                  onPress={() => { setEditingBlock(null); setEditorVisible(true); }}
+                  className="rounded-xl border-2 border-dashed border-border p-4 items-center justify-center mb-8"
+                >
+                  <Ionicons name="add-circle-outline" size={24} color={tc.primary} />
+                  <Text style={{ color: tc.primary, fontSize: 13, fontWeight: "500", marginTop: 4 }}>Add Block</Text>
+                </Pressable>
+              ) : <View style={{ height: 32 }} />
+            }
+            contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item: block, drag, isActive }: RenderItemParams<ScheduleBlock>) => {
               const colors = CATEGORY_COLORS[block.category] || CATEGORY_COLORS.routine;
               const duration = calculateDuration(block.startTime, block.endTime);
-              return (
+
+              const renderRightActions = (_progress: RNAnimated.AnimatedInterpolation<number>, dragX: RNAnimated.AnimatedInterpolation<number>) => {
+                const scale = dragX.interpolate({
+                  inputRange: [-80, 0],
+                  outputRange: [1, 0.5],
+                  extrapolate: "clamp",
+                });
+                return (
+                  <Pressable
+                    onPress={() => {
+                      deleteBlock(weekId, block.id);
+                      const updated = getSchedule(weekId).filter(b => b.id !== block.id);
+                      persistSchedule(updated);
+                    }}
+                    style={{ backgroundColor: "#EF4444", justifyContent: "center", alignItems: "center", width: 80, borderRadius: 12, marginBottom: 12, marginLeft: 8 }}
+                  >
+                    <RNAnimated.View style={{ transform: [{ scale }] }}>
+                      <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
+                      <Text style={{ color: "#FFFFFF", fontSize: 11, fontWeight: "600", marginTop: 2 }}>Delete</Text>
+                    </RNAnimated.View>
+                  </Pressable>
+                );
+              };
+
+              const card = (
                 <Pressable
-                  key={block.id}
                   onPress={() => {
                     if (!isLocked) {
                       setEditingBlock(block);
@@ -544,7 +588,17 @@ export default function WeekPlanScreen() {
                     }
                   }}
                   className="rounded-xl overflow-hidden mb-3"
-                  style={{ borderLeftWidth: 4, borderLeftColor: colors.border, backgroundColor: colors.bg }}
+                  style={{
+                    borderLeftWidth: 4,
+                    borderLeftColor: colors.border,
+                    backgroundColor: colors.bg,
+                    opacity: isActive ? 0.9 : 1,
+                    elevation: isActive ? 8 : 0,
+                    shadowColor: isActive ? "#000" : "transparent",
+                    shadowOffset: { width: 0, height: isActive ? 4 : 0 },
+                    shadowOpacity: isActive ? 0.2 : 0,
+                    shadowRadius: isActive ? 8 : 0,
+                  }}
                 >
                   <View className="p-4">
                     <View className="flex-row items-start justify-between mb-1">
@@ -562,36 +616,39 @@ export default function WeekPlanScreen() {
                           <Text style={{ color: colors.border, fontSize: 11, fontWeight: "600" }}>{`${duration}m`}</Text>
                         </View>
                         {!isLocked && <Ionicons name="create-outline" size={14} color="#9CA3AF" />}
+                        {!isLocked && (
+                          <Pressable onLongPress={drag} delayLongPress={100} hitSlop={8}>
+                            <Ionicons name="menu" size={18} color="#9CA3AF" />
+                          </Pressable>
+                        )}
                       </View>
                     </View>
                     <Text className="text-xs text-muted-foreground mt-1">{block.description}</Text>
                   </View>
                 </Pressable>
               );
-            })}
 
-            {!isLocked && (
-              <Pressable
-                onPress={() => { setEditingBlock(null); setEditorVisible(true); }}
-                className="rounded-xl border-2 border-dashed border-border p-4 items-center justify-center"
-              >
-                <Ionicons name="add-circle-outline" size={24} color={tc.primary} />
-                <Text style={{ color: tc.primary, fontSize: 13, fontWeight: "500", marginTop: 4 }}>Add Block</Text>
-              </Pressable>
-            )}
-          </ScrollView>
+              return (
+                <ScaleDecorator>
+                  {!isLocked ? (
+                    <Swipeable renderRightActions={renderRightActions} overshootRight={false}>
+                      {card}
+                    </Swipeable>
+                  ) : card}
+                </ScaleDecorator>
+              );
+            }}
+          />
           <ScheduleBlockEditor
             visible={editorVisible}
             block={editingBlock}
             themeColor={tc.primary}
             onSave={(saved) => {
-              // Optimistic update
               if (editingBlock) {
                 updateBlock(weekId, saved.id, saved);
               } else {
                 addBlock(weekId, saved);
               }
-              // Compute the updated schedule and persist
               const current = getSchedule(weekId);
               let updated: ScheduleBlock[];
               if (editingBlock) {
@@ -606,18 +663,6 @@ export default function WeekPlanScreen() {
               deleteBlock(weekId, blockId);
               const updated = getSchedule(weekId).filter(b => b.id !== blockId);
               persistSchedule(updated);
-            }}
-            onReorder={(blockId, direction) => {
-              const current = getSchedule(weekId);
-              const idx = current.findIndex(b => b.id === blockId);
-              if (idx < 0) return;
-              const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-              if (targetIdx < 0 || targetIdx >= current.length) return;
-              const reordered = [...current];
-              [reordered[idx], reordered[targetIdx]] = [reordered[targetIdx], reordered[idx]];
-              // Reinitialize the schedule context with the new order
-              initializeSchedule(weekId, reordered);
-              persistSchedule(reordered);
             }}
             onClose={() => { setEditorVisible(false); setEditingBlock(null); }}
           />
