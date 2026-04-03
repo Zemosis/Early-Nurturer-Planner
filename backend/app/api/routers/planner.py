@@ -687,6 +687,7 @@ async def get_plan(user_id: str, plan_id: str):
         "cover_image_url": plan_row.cover_image_url,
         "pdf_url": plan_row.pdf_url,
         "material_urls": plan_row.material_urls,
+        "schedule": plan_row.schedule,
     }
 
 
@@ -1098,6 +1099,62 @@ async def update_circle_time(user_id: str, plan_id: str, body: CircleTimeUpdateR
 
     logger.info("Updated circle-time songs for plan %s", plan_id)
     return {"status": "updated", "circle_time": circle_time}
+
+
+# ── Phase 7: Two-Way Schedule Sync ─────────────────────────
+
+
+class ScheduleBlockPayload(BaseModel):
+    """A single timed schedule block from the mobile editor."""
+    id: str
+    startTime: str
+    endTime: str
+    title: str
+    description: str
+    category: str
+    notes: str | None = None
+
+
+class UpdateScheduleRequest(BaseModel):
+    """Payload for PATCH /schedule — full schedule keyed by weekId."""
+    schedule: dict[str, list[ScheduleBlockPayload]]
+
+
+@router.patch("/{user_id}/plan/{plan_id}/schedule")
+async def update_schedule(user_id: str, plan_id: str, body: UpdateScheduleRequest):
+    """Persist the user-edited daily schedule blocks to the database."""
+    try:
+        user_uid = uuid.UUID(user_id)
+        plan_uid = uuid.UUID(plan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id or plan_id")
+
+    # Serialize Pydantic models to plain dicts for JSONB storage
+    schedule_data = {
+        key: [block.model_dump() for block in blocks]
+        for key, blocks in body.schedule.items()
+    }
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(WeeklyPlan).where(
+                WeeklyPlan.id == plan_uid,
+                WeeklyPlan.user_id == user_uid,
+            )
+        )
+        plan_row = result.scalar_one_or_none()
+        if not plan_row:
+            raise HTTPException(status_code=404, detail="Plan not found.")
+
+        await session.execute(
+            sa_update(WeeklyPlan)
+            .where(WeeklyPlan.id == plan_uid)
+            .values(schedule=schedule_data)
+        )
+        await session.commit()
+
+    logger.info("Updated schedule for plan %s", plan_id)
+    return {"status": "updated", "schedule": schedule_data}
 
 
 # ── Phase 3: Bulk PDF Export ────────────────────────────────

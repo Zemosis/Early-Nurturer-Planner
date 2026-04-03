@@ -25,7 +25,7 @@ from app.agents.schemas import WeekPlanSchema
 from app.agents.state import PlannerState
 from app.agents.tools import fetch_student_context, query_pedagogy
 from app.db.database import async_session_factory
-from app.db.models import AgentReasoningLog, WeeklyPlan
+from app.db.models import WeeklyPlan
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ async def save_plan_node(state: PlannerState) -> dict:
     """Persist the assembled plan and reasoning log to Postgres.
 
     - Saves draft_plan → weekly_plans table (upsert on year/month/week_of_month)
-    - Logs pipeline completion → agent_reasoning_logs table
+    - Logs pipeline completion via Python logger
     - Returns saved_plan_id so the API can pass it to the frontend
     """
     draft_plan = state.get("draft_plan")
@@ -171,18 +171,6 @@ async def save_plan_node(state: PlannerState) -> dict:
                 )
             )
             saved_id = row.scalar()
-
-            # ── 2. Log pipeline completion ────────────────────
-            reasoning_log = AgentReasoningLog(
-                thread_id=thread_id,
-                agent_name="save",
-                internal_monologue=(
-                    f"Pipeline completed after {iteration_count} architect iteration(s)."
-                ),
-                input_summary=f"thread={thread_id}, user={user_id_str}",
-                output_summary=f"Saved week {week_num} plan for theme '{final_plan.get('theme')}'.",
-            )
-            session.add(reasoning_log)
 
             await session.commit()
 

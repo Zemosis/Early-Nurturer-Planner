@@ -9,4 +9,6 @@ venv/
 dev-log.md
 scripts/
 alembic/
+.claude/
+CLAUDE.md
 *.json

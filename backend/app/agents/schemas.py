@@ -222,8 +222,8 @@ class AuditScores(BaseModel):
 class AuditResultSchema(BaseModel):
     """Structured output from the Safety Auditor agent.
 
-    Maps directly to the critique_history DB table. The Auditor must
-    produce this schema after reviewing the Architect's draft plan.
+    The Auditor must produce this schema after reviewing the
+    Architect's draft plan.
     """
 
     accepted: bool = Field(
