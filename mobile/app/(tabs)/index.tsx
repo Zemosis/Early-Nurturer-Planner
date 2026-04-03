@@ -1,33 +1,32 @@
 import { useCallback, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { usePlanner, fetchAllPlans, type WeekPlanSummary } from "shared";
-import { Card, CardHeader, CardTitle, CardContent } from "../../components/ui/Card";
-import { Badge } from "../../components/ui/Badge";
 
 export default function DashboardScreen() {
   const { allPlans, setAllPlans } = usePlanner();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
+  const loadPlans = useCallback(async (isRefresh = false) => {
+    try {
+      if (isRefresh) setRefreshing(true);
+      const plans = await fetchAllPlans();
+      setAllPlans(plans);
+      setError(null);
+    } catch (e) {
+      setError("Failed to load plans. Check your connection.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      let cancelled = false;
-      (async () => {
-        try {
-          const plans = await fetchAllPlans();
-          if (!cancelled) {
-            setAllPlans(plans);
-            setError(null);
-          }
-        } catch (e) {
-          if (!cancelled) setError("Failed to load plans. Check your connection.");
-        } finally {
-          if (!cancelled) setLoading(false);
-        }
-      })();
-      return () => { cancelled = true; };
+      loadPlans();
     }, [])
   );
 
@@ -40,7 +39,7 @@ export default function DashboardScreen() {
     );
   }
 
-  if (error) {
+  if (error && allPlans.length === 0) {
     return (
       <View className="flex-1 items-center justify-center bg-background px-6">
         <Text className="text-destructive text-base text-center">{error}</Text>
@@ -88,20 +87,27 @@ export default function DashboardScreen() {
     );
   };
 
+  const listHeader = (
+    <View className="pb-3 pt-2">
+      <Text className="text-2xl font-bold text-foreground">My Plans</Text>
+      <Text className="text-sm text-muted-foreground mt-1">
+        {allPlans.length} weekly {allPlans.length === 1 ? "plan" : "plans"}
+      </Text>
+    </View>
+  );
+
   return (
     <View className="flex-1 bg-background">
-      <View className="px-4 pt-14 pb-3">
-        <Text className="text-2xl font-bold text-foreground">My Plans</Text>
-        <Text className="text-sm text-muted-foreground mt-1">
-          {allPlans.length} weekly {allPlans.length === 1 ? "plan" : "plans"}
-        </Text>
-      </View>
       <FlatList
         data={allPlans}
         keyExtractor={(item) => item.id}
         renderItem={renderPlanCard}
+        ListHeaderComponent={listHeader}
         contentContainerClassName="px-4 pb-6"
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => loadPlans(true)} tintColor="#387F39" colors={["#387F39"]} />
+        }
       />
     </View>
   );

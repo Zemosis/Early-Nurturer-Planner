@@ -92,6 +92,12 @@ function getDefaultSchedule(week: WeekPlan): ScheduleBlock[] {
   ];
 }
 
+function getYouTubeThumbnail(url: string): string | null {
+  if (!url) return null;
+  const match = url.match(/(?:youtube\.com\/(?:embed\/|watch\?v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  return match ? `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg` : null;
+}
+
 function extractAllMaterials(plan: WeekPlan): string[] {
   const allMaterials = plan.activities.flatMap((a) => a.materials);
   return [...new Set(allMaterials)].sort();
@@ -762,18 +768,29 @@ export default function WeekPlanScreen() {
                   <Text className="text-sm font-semibold text-foreground">Greeting Song</Text>
                 </View>
                 <Text className="text-base font-medium mb-2" style={{ color: tc.primary }}>{plan.circleTime.greetingSong.title}</Text>
-                {plan.circleTime.greetingSong.videoUrl ? (
-                  <Pressable
-                    onPress={() => Linking.openURL(plan.circleTime.greetingSong.videoUrl)}
-                    className="mb-3"
-                  >
-                    <View className="bg-muted rounded-lg p-3 flex-row items-center">
-                      <Ionicons name="play-circle" size={24} color={tc.primary} style={{ marginRight: 10 }} />
-                      <Text className="text-xs font-medium flex-1" style={{ color: tc.primary }}>Watch on YouTube</Text>
-                      <Ionicons name="open-outline" size={14} color={tc.primary} />
-                    </View>
-                  </Pressable>
-                ) : null}
+                {plan.circleTime.greetingSong.videoUrl ? (() => {
+                  const thumb = getYouTubeThumbnail(plan.circleTime.greetingSong.videoUrl);
+                  return thumb ? (
+                    <Pressable onPress={() => Linking.openURL(plan.circleTime.greetingSong.videoUrl)} className="mb-3">
+                      <View className="relative">
+                        <Image source={{ uri: thumb }} className="w-full rounded-lg" style={{ height: 180 }} resizeMode="cover" />
+                        <View className="absolute inset-0 items-center justify-center">
+                          <View className="bg-black/50 rounded-full w-12 h-12 items-center justify-center">
+                            <Ionicons name="play" size={24} color="#fff" />
+                          </View>
+                        </View>
+                      </View>
+                    </Pressable>
+                  ) : (
+                    <Pressable onPress={() => Linking.openURL(plan.circleTime.greetingSong.videoUrl)} className="mb-3">
+                      <View className="bg-muted rounded-lg p-3 flex-row items-center">
+                        <Ionicons name="play-circle" size={24} color={tc.primary} style={{ marginRight: 10 }} />
+                        <Text className="text-xs font-medium flex-1" style={{ color: tc.primary }}>Watch on YouTube</Text>
+                        <Ionicons name="open-outline" size={14} color={tc.primary} />
+                      </View>
+                    </Pressable>
+                  );
+                })() : null}
                 <Text className="text-xs text-muted-foreground leading-5">{plan.circleTime.greetingSong.script}</Text>
               </CardContent>
             </Card>
@@ -786,18 +803,29 @@ export default function WeekPlanScreen() {
                   <Text className="text-sm font-semibold text-foreground">Goodbye Song</Text>
                 </View>
                 <Text className="text-base font-medium mb-2" style={{ color: tc.primary }}>{plan.circleTime.goodbyeSong.title}</Text>
-                {plan.circleTime.goodbyeSong.videoUrl ? (
-                  <Pressable
-                    onPress={() => Linking.openURL(plan.circleTime.goodbyeSong.videoUrl)}
-                    className="mb-3"
-                  >
-                    <View className="bg-muted rounded-lg p-3 flex-row items-center">
-                      <Ionicons name="play-circle" size={24} color={tc.primary} style={{ marginRight: 10 }} />
-                      <Text className="text-xs font-medium flex-1" style={{ color: tc.primary }}>Watch on YouTube</Text>
-                      <Ionicons name="open-outline" size={14} color={tc.primary} />
-                    </View>
-                  </Pressable>
-                ) : null}
+                {plan.circleTime.goodbyeSong.videoUrl ? (() => {
+                  const thumb = getYouTubeThumbnail(plan.circleTime.goodbyeSong.videoUrl);
+                  return thumb ? (
+                    <Pressable onPress={() => Linking.openURL(plan.circleTime.goodbyeSong.videoUrl)} className="mb-3">
+                      <View className="relative">
+                        <Image source={{ uri: thumb }} className="w-full rounded-lg" style={{ height: 180 }} resizeMode="cover" />
+                        <View className="absolute inset-0 items-center justify-center">
+                          <View className="bg-black/50 rounded-full w-12 h-12 items-center justify-center">
+                            <Ionicons name="play" size={24} color="#fff" />
+                          </View>
+                        </View>
+                      </View>
+                    </Pressable>
+                  ) : (
+                    <Pressable onPress={() => Linking.openURL(plan.circleTime.goodbyeSong.videoUrl)} className="mb-3">
+                      <View className="bg-muted rounded-lg p-3 flex-row items-center">
+                        <Ionicons name="play-circle" size={24} color={tc.primary} style={{ marginRight: 10 }} />
+                        <Text className="text-xs font-medium flex-1" style={{ color: tc.primary }}>Watch on YouTube</Text>
+                        <Ionicons name="open-outline" size={14} color={tc.primary} />
+                      </View>
+                    </Pressable>
+                  );
+                })() : null}
                 <Text className="text-xs text-muted-foreground leading-5">{plan.circleTime.goodbyeSong.script}</Text>
               </CardContent>
             </Card>
@@ -926,22 +954,38 @@ export default function WeekPlanScreen() {
             ) : (
               <Card>
                 <CardContent>
-                  {masterMaterials.map((material, i) => (
-                    <View
-                      key={i}
-                      className={`flex-row items-center py-2.5 ${
-                        i < masterMaterials.length - 1 ? "border-b border-border" : ""
-                      }`}
-                    >
-                      <Ionicons
-                        name="ellipse-outline"
-                        size={18}
-                        color={tc.primary}
-                        style={{ marginRight: 10 }}
-                      />
-                      <Text className="text-sm text-foreground flex-1">{material}</Text>
-                    </View>
-                  ))}
+                  {masterMaterials.map((material, i) => {
+                    const isChecked = checkedMaterials.has(material);
+                    return (
+                      <Pressable
+                        key={i}
+                        onPress={() => {
+                          setCheckedMaterials((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(material)) next.delete(material);
+                            else next.add(material);
+                            return next;
+                          });
+                        }}
+                        className={`flex-row items-center py-2.5 ${
+                          i < masterMaterials.length - 1 ? "border-b border-border" : ""
+                        }`}
+                      >
+                        <Ionicons
+                          name={isChecked ? "checkmark-circle" : "ellipse-outline"}
+                          size={20}
+                          color={isChecked ? tc.primary : "#D1D5DB"}
+                          style={{ marginRight: 10 }}
+                        />
+                        <Text
+                          className="text-sm flex-1"
+                          style={{ color: isChecked ? "#9CA3AF" : "#1a1a1a", textDecorationLine: isChecked ? "line-through" : "none" }}
+                        >
+                          {material}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </CardContent>
               </Card>
             )}
@@ -1071,7 +1115,7 @@ export default function WeekPlanScreen() {
                               >
                                 <Text style={{ color: ageColors.text, fontSize: 10, fontWeight: "500" }}>{student.age.group}</Text>
                               </View>
-                              {student.tags?.slice(0, 2).map((tag) => (
+                              {student.tags?.filter((tag) => tag !== student.age.group).slice(0, 2).map((tag) => (
                                 <View key={tag} className="rounded-md px-2 py-0.5" style={{ backgroundColor: "#F3F4F6" }}>
                                   <Text className="text-xs text-muted-foreground">{tag}</Text>
                                 </View>

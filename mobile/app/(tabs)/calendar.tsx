@@ -48,12 +48,12 @@ export default function CalendarScreen() {
         const isStart = idx === 0;
         const isEnd = idx === dates.length - 1;
         marked[dateStr] = {
-          color: planColor + "20",
+          color: planColor + "35",
           textColor: "#1a1a1a",
           startingDay: isStart,
           endingDay: isEnd,
           ...(isStart || isEnd
-            ? { customContainerStyle: { backgroundColor: planColor }, textColor: "#fff" }
+            ? { color: planColor, textColor: "#fff" }
             : {}),
         };
       });
@@ -73,9 +73,8 @@ export default function CalendarScreen() {
 
   return (
     <ScrollView className="flex-1 bg-background" contentContainerClassName="pb-8">
-      <View className="px-4 pt-14 pb-3">
-        <Text className="text-2xl font-bold text-foreground">Calendar</Text>
-        <Text className="text-sm text-muted-foreground mt-1">
+      <View className="px-4 pt-2 pb-2">
+        <Text className="text-xs text-muted-foreground">
           Tap a highlighted week to see details
         </Text>
       </View>

@@ -38,6 +38,9 @@ backend/data_prep/
 samples/
 temp_pdfs/
 
+# Firebase
+.firebase/
+
 # Claude
 CLAUDE.md
 .claude/

@@ -110,8 +110,9 @@ export function ScheduleBlockEditor({
               value={title}
               onChangeText={setTitle}
               placeholder="Block title"
-              className="border border-border rounded-xl px-4 py-3 text-sm text-foreground mb-4"
+              className="rounded-xl px-4 py-3 text-sm text-foreground mb-4"
               placeholderTextColor="#9CA3AF"
+              style={{ borderWidth: 1.5, borderColor: "#D1D5DB" }}
             />
 
             {/* Description */}
@@ -124,9 +125,9 @@ export function ScheduleBlockEditor({
               placeholder="What happens during this block?"
               multiline
               numberOfLines={3}
-              className="border border-border rounded-xl px-4 py-3 text-sm text-foreground mb-4"
+              className="rounded-xl px-4 py-3 text-sm text-foreground mb-4"
               placeholderTextColor="#9CA3AF"
-              style={{ textAlignVertical: "top", minHeight: 72 }}
+              style={{ textAlignVertical: "top", minHeight: 72, borderWidth: 1.5, borderColor: "#D1D5DB" }}
             />
 
             {/* Time Row */}
@@ -139,8 +140,9 @@ export function ScheduleBlockEditor({
                   value={startTime}
                   onChangeText={setStartTime}
                   placeholder="08:00"
-                  className="border border-border rounded-xl px-4 py-3 text-sm text-foreground"
+                  className="rounded-xl px-4 py-3 text-sm text-foreground"
                   placeholderTextColor="#9CA3AF"
+                  style={{ borderWidth: 1.5, borderColor: "#D1D5DB" }}
                 />
               </View>
               <View className="flex-1">
@@ -151,8 +153,9 @@ export function ScheduleBlockEditor({
                   value={endTime}
                   onChangeText={setEndTime}
                   placeholder="08:30"
-                  className="border border-border rounded-xl px-4 py-3 text-sm text-foreground"
+                  className="rounded-xl px-4 py-3 text-sm text-foreground"
                   placeholderTextColor="#9CA3AF"
+                  style={{ borderWidth: 1.5, borderColor: "#D1D5DB" }}
                 />
               </View>
             </View>
