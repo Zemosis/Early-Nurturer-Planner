@@ -21,9 +21,9 @@ import {
 import { usePlanner } from "shared";
 
 interface ChatAssistantProps {
-  isOpen: boolean;
-  onToggle: () => void;
-  planId: string | undefined;
+  isOpen?: boolean;
+  onToggle?: () => void;
+  planId?: string;
 }
 
 const SUGGESTIONS = [
@@ -317,8 +317,8 @@ function MessageBubble({
 }
 
 export function ChatAssistant({
-  isOpen,
-  onToggle,
+  isOpen = false,
+  onToggle = () => {},
   planId,
 }: ChatAssistantProps) {
   const {

@@ -196,10 +196,21 @@ export function ChatProvider({ children, planId, planContext }: ChatProviderProp
   );
 }
 
+const NOOP_CONTEXT: ChatContextValue = {
+  messages: [],
+  threadId: null,
+  loading: false,
+  error: null,
+  sendMessage: async () => {},
+  startNewThread: async () => {},
+  retryLastMessage: async () => {},
+  pendingEdit: null,
+  clearPendingEdit: () => {},
+  threadRotated: false,
+};
+
 export function useChat(): ChatContextValue {
   const ctx = useContext(ChatContext);
-  if (!ctx) {
-    throw new Error("useChat must be used within a ChatProvider");
-  }
-  return ctx;
+  // Return no-op fallback when used outside ChatProvider (e.g. Dashboard)
+  return ctx ?? NOOP_CONTEXT;
 }
