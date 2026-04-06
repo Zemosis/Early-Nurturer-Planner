@@ -16,7 +16,7 @@ import {
 } from "react";
 import {
   sendChatMessage,
-  fetchChatThread,
+  fetchThreadForPlan,
   startNewChatThread,
   DEFAULT_USER_ID,
   type ChatMessage,
@@ -61,7 +61,7 @@ export function ChatProvider({ children, planId, planContext }: ChatProviderProp
   const lastUserMessage = useRef<string | null>(null);
   const isFirstMessage = useRef(true);
 
-  // Reset when plan changes
+  // Restore or reset thread when plan changes
   useEffect(() => {
     setMessages([]);
     setThreadId(null);
@@ -69,6 +69,24 @@ export function ChatProvider({ children, planId, planContext }: ChatProviderProp
     setPendingEdit(null);
     setThreadRotated(false);
     isFirstMessage.current = true;
+
+    if (!planId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await fetchThreadForPlan(DEFAULT_USER_ID, planId);
+        if (cancelled) return;
+        if (result.thread_id && result.messages.length > 0) {
+          setThreadId(result.thread_id);
+          setMessages(result.messages);
+          isFirstMessage.current = false;
+        }
+      } catch {
+        // Silently fail — user will start a fresh conversation
+      }
+    })();
+    return () => { cancelled = true; };
   }, [planId]);
 
   const sendMessage = useCallback(
@@ -94,6 +112,7 @@ export function ChatProvider({ children, planId, planContext }: ChatProviderProp
         const response: ChatResponse = await sendChatMessage(DEFAULT_USER_ID, {
           threadId: threadId ?? undefined,
           message: text,
+          planId: planId ?? undefined,
           planContext: shouldSendContext ? planContext : undefined,
         });
 
@@ -149,12 +168,12 @@ export function ChatProvider({ children, planId, planContext }: ChatProviderProp
         setLoading(false);
       }
     },
-    [loading, threadId, planContext]
+    [loading, threadId, planId, planContext]
   );
 
   const startNewThread = useCallback(async () => {
     try {
-      const result = await startNewChatThread(DEFAULT_USER_ID, planContext ?? undefined);
+      const result = await startNewChatThread(DEFAULT_USER_ID, planId ?? undefined, planContext ?? undefined);
       setThreadId(result.thread_id);
       setMessages([]);
       setError(null);
@@ -164,7 +183,7 @@ export function ChatProvider({ children, planId, planContext }: ChatProviderProp
     } catch {
       // Silently fail — user can retry
     }
-  }, [planContext]);
+  }, [planId, planContext]);
 
   const retryLastMessage = useCallback(async () => {
     if (lastUserMessage.current) {

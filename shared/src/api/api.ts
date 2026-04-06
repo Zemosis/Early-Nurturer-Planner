@@ -458,7 +458,7 @@ export interface ChatPlanContext {
 
 export async function sendChatMessage(
   userId: string,
-  body: { threadId?: string; message: string; planContext?: ChatPlanContext },
+  body: { threadId?: string; message: string; planId?: string; planContext?: ChatPlanContext },
 ): Promise<ChatResponse> {
   const res = await fetch(`${apiBase}/api/chat/${userId}/message`, {
     method: "POST",
@@ -466,6 +466,7 @@ export async function sendChatMessage(
     body: JSON.stringify({
       thread_id: body.threadId ?? null,
       message: body.message,
+      plan_id: body.planId ?? null,
       plan_context: body.planContext ?? null,
     }),
   });
@@ -504,14 +505,27 @@ export async function fetchChatThread(
   return res.json();
 }
 
+export async function fetchThreadForPlan(
+  userId: string,
+  planId: string,
+): Promise<{ thread_id: string | null; messages: ChatMessage[] }> {
+  const res = await fetch(`${apiBase}/api/chat/${userId}/plan/${planId}/thread`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Failed to fetch thread for plan");
+  }
+  return res.json();
+}
+
 export async function startNewChatThread(
   userId: string = DEFAULT_USER_ID,
+  planId?: string,
   planContext?: ChatPlanContext,
 ): Promise<{ thread_id: string }> {
   const res = await fetch(`${apiBase}/api/chat/${userId}/thread/new`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan_context: planContext ?? null }),
+    body: JSON.stringify({ plan_id: planId ?? null, plan_context: planContext ?? null }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));

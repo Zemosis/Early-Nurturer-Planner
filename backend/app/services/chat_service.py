@@ -157,34 +157,45 @@ educators are busy professionals.
 # ── Thread management ────────────────────────────────────────
 
 async def get_or_create_thread(
-    user_id: str, plan_context: dict | None = None
+    user_id: str,
+    plan_id: str | None = None,
+    plan_context: dict | None = None,
 ) -> str:
-    """Find the user's latest active thread, or create a new one.
+    """Find the user's active thread for a plan, or create a new one.
 
-    If plan_context is provided, it's stored in the first system message's
-    metadata so subsequent messages don't need to resend it.
+    Threads are scoped by plan_id (stored in system message metadata).
+    If plan_context is provided, it's stored alongside plan_id.
     """
     async with async_session_factory() as session:
-        # Look for existing thread
-        result = await session.execute(
-            select(ChatHistory.thread_id)
-            .where(ChatHistory.user_id == user_id)
-            .order_by(desc(ChatHistory.created_at))
-            .limit(1)
-        )
-        row = result.scalar_one_or_none()
-
-        if row and plan_context is None:
-            return row
+        if plan_id:
+            # Find existing thread for this specific plan
+            result = await session.execute(
+                select(ChatHistory.thread_id)
+                .where(
+                    ChatHistory.user_id == user_id,
+                    ChatHistory.role == "system",
+                    ChatHistory.metadata_["plan_id"].astext == plan_id,
+                )
+                .order_by(desc(ChatHistory.created_at))
+                .limit(1)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                return row
 
         # Create new thread
         thread_id = str(uuid.uuid4())
+        meta: dict = {}
+        if plan_id:
+            meta["plan_id"] = plan_id
+        if plan_context:
+            meta["plan_context"] = plan_context
         system_msg = ChatHistory(
             user_id=user_id,
             thread_id=thread_id,
             role="system",
             content="Chat thread initialized.",
-            metadata_={"plan_context": plan_context} if plan_context else {},
+            metadata_=meta,
         )
         session.add(system_msg)
         await session.commit()
@@ -192,21 +203,58 @@ async def get_or_create_thread(
 
 
 async def create_new_thread(
-    user_id: str, plan_context: dict | None = None
+    user_id: str,
+    plan_id: str | None = None,
+    plan_context: dict | None = None,
 ) -> str:
-    """Force-create a new thread."""
+    """Force-create a new thread scoped to a plan."""
     thread_id = str(uuid.uuid4())
+    meta: dict = {}
+    if plan_id:
+        meta["plan_id"] = plan_id
+    if plan_context:
+        meta["plan_context"] = plan_context
     async with async_session_factory() as session:
         system_msg = ChatHistory(
             user_id=user_id,
             thread_id=thread_id,
             role="system",
             content="Chat thread initialized.",
-            metadata_={"plan_context": plan_context} if plan_context else {},
+            metadata_=meta,
         )
         session.add(system_msg)
         await session.commit()
     return thread_id
+
+
+async def get_thread_for_plan(
+    user_id: str, plan_id: str
+) -> dict | None:
+    """Find the active thread for a plan and return it with recent messages.
+
+    Returns { thread_id, messages } or None if no thread exists.
+    """
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(ChatHistory.thread_id)
+            .where(
+                ChatHistory.user_id == user_id,
+                ChatHistory.role == "system",
+                ChatHistory.metadata_["plan_id"].astext == plan_id,
+            )
+            .order_by(desc(ChatHistory.created_at))
+            .limit(1)
+        )
+        thread_id = result.scalar_one_or_none()
+
+    if not thread_id:
+        return None
+
+    history = await get_thread_history(thread_id, limit=50)
+    return {
+        "thread_id": thread_id,
+        "messages": history["messages"],
+    }
 
 
 async def get_thread_history(
@@ -486,8 +534,19 @@ async def send_message(
     # Check token budget — rotate thread if needed
     total_tokens = _count_thread_tokens(messages) + _estimate_tokens(user_message)
     if total_tokens >= TOKEN_LIMIT and len(messages) > 0:
-        # Get plan context and last assistant message from old thread
+        # Get plan context, plan_id, and last assistant message from old thread
         old_plan_context = await _get_plan_context_from_thread(thread_id)
+        old_plan_id = None
+        async with async_session_factory() as session:
+            old_sys = await session.execute(
+                select(ChatHistory.metadata_)
+                .where(ChatHistory.thread_id == thread_id, ChatHistory.role == "system")
+                .order_by(ChatHistory.created_at).limit(1)
+            )
+            old_sys_meta = old_sys.scalar_one_or_none() or {}
+            if isinstance(old_sys_meta, dict):
+                old_plan_id = old_sys_meta.get("plan_id")
+
         last_assistant = None
         applied_edits = []
         for m in reversed(messages):
@@ -497,8 +556,10 @@ async def send_message(
             if meta.get("activity_edit"):
                 applied_edits.append(meta["activity_edit"])
 
-        # Create new thread with carryover context
+        # Create new thread with carryover context (including plan_id)
         new_meta = {}
+        if old_plan_id:
+            new_meta["plan_id"] = old_plan_id
         if old_plan_context:
             new_meta["plan_context"] = old_plan_context
         if last_assistant:
