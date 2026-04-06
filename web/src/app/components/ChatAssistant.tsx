@@ -266,12 +266,24 @@ function MessageBubble({
     | undefined;
 
   if (isSystem) {
+    const isRichContent = message.content.includes("`") || message.content.includes("**");
     return (
-      <div className="flex justify-center my-3">
-        <div className="px-3 py-1.5 bg-muted/30 rounded-full">
-          <p className="text-xs text-muted-foreground text-center">
-            {message.content}
-          </p>
+      <div className={`flex justify-center my-3 ${isRichContent ? "px-2" : ""}`}>
+        <div className={isRichContent
+          ? "px-4 py-3 bg-muted/20 rounded-xl max-w-[85%]"
+          : "px-3 py-1.5 bg-muted/30 rounded-full"
+        }>
+          {isRichContent ? (
+            <div className="text-xs text-muted-foreground prose prose-sm max-w-none prose-p:my-0.5 prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground text-center">
+              {message.content}
+            </p>
+          )}
         </div>
       </div>
     );
@@ -327,6 +339,7 @@ export function ChatAssistant({
     error,
     sendMessage,
     startNewThread,
+    clearHistory,
     retryLastMessage,
     clearPendingEdit,
   } = useChat();
@@ -346,10 +359,45 @@ export function ChatAssistant({
     }
   }, [isOpen]);
 
+  // Local-only system messages (e.g. /help output)
+  const [localSystemMessages, setLocalSystemMessages] = useState<typeof messages>([]);
+
   const handleSend = () => {
     if (!input.trim() || loading) return;
-    sendMessage(input.trim());
+    const trimmed = input.trim();
     setInput("");
+
+    if (trimmed.startsWith("/")) {
+      const lower = trimmed.toLowerCase();
+
+      if (lower === "/clear") {
+        clearHistory();
+        setLocalSystemMessages([]);
+        toast.success("Chat history cleared.");
+        return;
+      }
+
+      if (lower === "/help") {
+        setLocalSystemMessages((prev) => [
+          ...prev,
+          {
+            id: `system-help-${Date.now()}`,
+            role: "system" as const,
+            content:
+              "**Available commands:**\n" +
+              "`/clear` — Clear this conversation's chat history\n" +
+              "`/help` — Show this help message",
+            metadata: {},
+            created_at: new Date().toISOString(),
+          },
+        ]);
+        return;
+      }
+
+      // Unknown command — send as regular message
+    }
+
+    sendMessage(trimmed);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -363,7 +411,8 @@ export function ChatAssistant({
     sendMessage(text);
   };
 
-  const isEmpty = messages.length === 0;
+  const allMessages = [...messages, ...localSystemMessages];
+  const isEmpty = allMessages.length === 0;
 
   // Shared chat content (used by both mobile and desktop)
   const chatContent = (
@@ -416,7 +465,7 @@ export function ChatAssistant({
           </>
         ) : (
           <>
-            {messages.map((msg) => (
+            {allMessages.map((msg) => (
               <MessageBubble
                 key={msg.id}
                 message={msg}

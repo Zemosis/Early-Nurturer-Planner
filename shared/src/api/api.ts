@@ -517,6 +517,19 @@ export async function fetchThreadForPlan(
   return res.json();
 }
 
+export async function deleteChatThread(
+  userId: string,
+  threadId: string,
+): Promise<void> {
+  const res = await fetch(`${apiBase}/api/chat/${userId}/thread/${threadId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Failed to delete thread");
+  }
+}
+
 export async function startNewChatThread(
   userId: string = DEFAULT_USER_ID,
   planId?: string,

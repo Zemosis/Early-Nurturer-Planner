@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc
+from sqlalchemy import delete as sa_delete, select, func, desc
 
 from app.db.database import async_session_factory
 from app.db.models import ChatHistory, WeeklyPlan, Student
@@ -225,6 +225,20 @@ async def create_new_thread(
         session.add(system_msg)
         await session.commit()
     return thread_id
+
+
+async def delete_thread(user_id: str, thread_id: str) -> bool:
+    """Delete all messages in a thread. Returns True if any were deleted."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            sa_delete(ChatHistory)
+            .where(
+                ChatHistory.user_id == user_id,
+                ChatHistory.thread_id == thread_id,
+            )
+        )
+        await session.commit()
+        return result.rowcount > 0
 
 
 async def get_thread_for_plan(

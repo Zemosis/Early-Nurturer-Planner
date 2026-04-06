@@ -18,6 +18,7 @@ import {
   sendChatMessage,
   fetchThreadForPlan,
   startNewChatThread,
+  deleteChatThread,
   DEFAULT_USER_ID,
   type ChatMessage,
   type ChatActivityEdit,
@@ -37,6 +38,7 @@ interface ChatContextValue {
   error: ChatError | null;
   sendMessage: (text: string) => Promise<void>;
   startNewThread: () => Promise<void>;
+  clearHistory: () => Promise<void>;
   retryLastMessage: () => Promise<void>;
   pendingEdit: ChatActivityEdit | null;
   clearPendingEdit: () => void;
@@ -194,6 +196,22 @@ export function ChatProvider({ children, planId, planContext }: ChatProviderProp
     }
   }, [planId, planContext]);
 
+  const clearHistory = useCallback(async () => {
+    if (threadId) {
+      try {
+        await deleteChatThread(DEFAULT_USER_ID, threadId);
+      } catch {
+        // Continue with local clear even if backend fails
+      }
+    }
+    setMessages([]);
+    setThreadId(null);
+    setError(null);
+    setPendingEdit(null);
+    setThreadRotated(false);
+    isFirstMessage.current = true;
+  }, [threadId]);
+
   const retryLastMessage = useCallback(async () => {
     if (lastUserMessage.current) {
       await sendMessage(lastUserMessage.current);
@@ -213,6 +231,7 @@ export function ChatProvider({ children, planId, planContext }: ChatProviderProp
         error,
         sendMessage,
         startNewThread,
+        clearHistory,
         retryLastMessage,
         pendingEdit,
         clearPendingEdit,
@@ -231,6 +250,7 @@ const NOOP_CONTEXT: ChatContextValue = {
   error: null,
   sendMessage: async () => {},
   startNewThread: async () => {},
+  clearHistory: async () => {},
   retryLastMessage: async () => {},
   pendingEdit: null,
   clearPendingEdit: () => {},

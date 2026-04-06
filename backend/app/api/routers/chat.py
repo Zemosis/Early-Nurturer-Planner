@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from app.services.chat_service import (
     get_or_create_thread,
     create_new_thread,
+    delete_thread,
     get_thread_for_plan,
     get_thread_history,
     list_threads,
@@ -106,6 +107,15 @@ async def get_thread(
         limit = 50
     result = await get_thread_history(thread_id, cursor=cursor, limit=limit)
     return result
+
+
+@router.delete("/{user_id}/thread/{thread_id}")
+async def remove_thread(user_id: str, thread_id: str):
+    """Delete all messages in a thread."""
+    deleted = await delete_thread(user_id, thread_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Thread not found.")
+    return {"status": "deleted", "thread_id": thread_id}
 
 
 @router.post("/{user_id}/thread/new")
