@@ -435,12 +435,24 @@ export interface ChatPlanContext {
   week_number: number;
   theme: string;
   objectives: { domain: string; goal: string }[];
-  activity_index: {
+  circle_time: {
+    letter: string;
+    color: string;
+    shape: string;
+    counting_to: number;
+  };
+  activities: {
     id: string;
     day: string;
     title: string;
     domain: string;
     duration: number;
+    description: string;
+    materials: string[];
+    theme_connection: string;
+    safety_notes: string;
+    adaptations: { age_group: string; description: string }[];
+    reflection_prompts: string[];
   }[];
 }
 

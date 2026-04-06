@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, desc
 
 from app.db.database import async_session_factory
-from app.db.models import ChatHistory, WeeklyPlan
+from app.db.models import ChatHistory, WeeklyPlan, Student
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -115,25 +115,42 @@ EDIT_ACTIVITY_TOOL = types.Tool(
 # ── System prompt ────────────────────────────────────────────
 
 CHAT_SYSTEM_PROMPT = """\
-You are a curriculum assistant for early childhood educators working with \
-children aged 0-36 months. You have access to a weekly curriculum plan.
+You are **Nuri**, a senior early childhood curriculum specialist with 15 years \
+of experience in infant and toddler classrooms (ages 0-36 months). You work \
+alongside the educator as a trusted mentor and planning partner.
 
-Your capabilities:
-1. Answer questions about the plan, activities, or early childhood pedagogy.
-2. Suggest modifications to activities when the educator requests changes.
+You have FULL access to the weekly curriculum plan — every activity's \
+description, materials, adaptations, safety notes, and reflection prompts. \
+You also know the children in the classroom by name, age, and developmental \
+profile. Use this knowledge confidently and specifically.
 
-When the educator wants to modify a specific activity:
-- Use the edit_activity function with the activity_id and ONLY the fields \
-  that need changing.
+## How to respond
+
+**When asked about the plan or an activity:**
+- Reference the activity by name and quote its description, materials, or \
+  adaptations directly. Never say "I don't have that information."
+- If the educator asks about a specific day, list all activities for that day \
+  with their domains, durations, and key details.
+- When relevant, mention which children would benefit most and why, based on \
+  their age group and developmental notes.
+
+**When asked to modify an activity:**
+- Call the `edit_activity` function with the activity's `activity_id` and ONLY \
+  the fields that need changing.
 - Explain what you changed and why in your text response.
-- Always preserve or improve safety_notes and adaptations — never remove them.
+- Always preserve or improve `safety_notes` and `adaptations` — never remove them.
+- Consider the enrolled children's ages and developmental needs when suggesting \
+  modifications.
 
-When answering general questions:
-- Be warm, professional, and knowledgeable.
+**When asked general pedagogy questions:**
 - Ground advice in developmentally appropriate practice for infants/toddlers.
-- Reference the specific plan context when relevant.
+- Connect recommendations to the current week's theme when possible.
+- Suggest practical, classroom-ready ideas — not textbook theory.
 
-Keep responses concise and practical — educators are busy.
+## Tone
+Warm, concise, and practical. Think experienced colleague, not chatbot. \
+Use the children's names naturally when relevant. Keep responses focused — \
+educators are busy professionals.
 """
 
 
@@ -319,6 +336,110 @@ async def _get_plan_context_from_thread(thread_id: str) -> dict | None:
         return None
 
 
+# ── Student roster helper ────────────────────────────────────
+
+async def _fetch_student_roster(user_id: str) -> str | None:
+    """Fetch active students and format as a markdown section for the system prompt."""
+    try:
+        user_uid = uuid.UUID(user_id)
+    except ValueError:
+        return None
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Student)
+            .where(Student.user_id == user_uid, Student.is_active == True)
+            .order_by(Student.name)
+        )
+        students = result.scalars().all()
+
+    if not students:
+        return None
+
+    lines = ["\n\n## Student Roster"]
+    for s in students:
+        tags_str = ", ".join(s.tags) if s.tags else ""
+        line = f"- **{s.name}** — {s.age_months}mo ({s.age_group})"
+        if tags_str:
+            line += f" | Tags: {tags_str}"
+        if s.bio:
+            line += f" | Notes: {s.bio}"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+# ── Plan context formatting ─────────────────────────────────
+
+def _format_plan_context_markdown(ctx: dict) -> str:
+    """Format plan context as structured markdown for better Gemini comprehension."""
+    parts = []
+
+    theme = ctx.get("theme", "Unknown")
+    week = ctx.get("week_number", "?")
+    parts.append(f"\n\n## Weekly Plan: {theme} (Week {week})")
+
+    # Objectives
+    objectives = ctx.get("objectives", [])
+    if objectives:
+        parts.append("\n### Objectives")
+        for obj in objectives:
+            parts.append(f"- **{obj.get('domain', '')}**: {obj.get('goal', '')}")
+
+    # Circle time
+    ct = ctx.get("circle_time", {})
+    if ct:
+        parts.append(
+            f"\n### Circle Time\n"
+            f"- Letter of the week: **{ct.get('letter', '?')}**\n"
+            f"- Color: **{ct.get('color', '?')}**\n"
+            f"- Shape: **{ct.get('shape', '?')}**\n"
+            f"- Counting to: **{ct.get('counting_to', '?')}**"
+        )
+
+    # Activities grouped by day
+    activities = ctx.get("activities", [])
+    if activities:
+        parts.append("\n### Activities")
+        days_seen: dict[str, list] = {}
+        for act in activities:
+            day = act.get("day", "Unknown")
+            days_seen.setdefault(day, []).append(act)
+
+        for day, day_acts in days_seen.items():
+            parts.append(f"\n#### {day}")
+            for act in day_acts:
+                parts.append(
+                    f"**{act.get('title', 'Untitled')}** "
+                    f"(ID: `{act.get('id', '')}`) — "
+                    f"{act.get('domain', '')} | {act.get('duration', '?')} min"
+                )
+                desc = act.get("description", "")
+                if desc:
+                    parts.append(f"  Description: {desc}")
+                mats = act.get("materials", [])
+                if mats:
+                    parts.append(f"  Materials: {', '.join(mats)}")
+                tc = act.get("theme_connection", "")
+                if tc:
+                    parts.append(f"  Theme connection: {tc}")
+                sn = act.get("safety_notes", "")
+                if sn:
+                    parts.append(f"  Safety: {sn}")
+                adaptations = act.get("adaptations", [])
+                if adaptations:
+                    adapt_strs = [
+                        f"{a.get('age_group', '?')}: {a.get('description', '')}"
+                        for a in adaptations
+                    ]
+                    parts.append(f"  Adaptations: {' | '.join(adapt_strs)}")
+                rp = act.get("reflection_prompts", [])
+                if rp:
+                    parts.append(f"  Reflection: {'; '.join(rp)}")
+
+    return "\n".join(parts)
+
+
 # ── Main send_message function ───────────────────────────────
 
 async def send_message(
@@ -418,11 +539,15 @@ async def send_message(
     stored_plan_context = plan_context or await _get_plan_context_from_thread(thread_id)
 
     system_parts = [CHAT_SYSTEM_PROMPT]
+
+    # Format plan context as structured markdown (more natural for Gemini)
     if stored_plan_context:
-        system_parts.append(
-            f"\n\n## Current Weekly Plan Context\n```json\n"
-            f"{json.dumps(stored_plan_context, indent=2)}\n```"
-        )
+        system_parts.append(_format_plan_context_markdown(stored_plan_context))
+
+    # Fetch student roster (fresh each message so profile updates are reflected)
+    roster_text = await _fetch_student_roster(user_id)
+    if roster_text:
+        system_parts.append(roster_text)
 
     # Get previous context note from rotated thread
     async with async_session_factory() as session:

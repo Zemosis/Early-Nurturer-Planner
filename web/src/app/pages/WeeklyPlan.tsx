@@ -101,7 +101,7 @@ export default function WeeklyPlan() {
 
   const week = currentPlan;
 
-  // Build condensed plan context for the chat assistant
+  // Build full plan context for the chat assistant
   const chatPlanContext = useMemo<ChatPlanContext | null>(() => {
     if (!week || !weekId) return null;
     return {
@@ -109,12 +109,27 @@ export default function WeeklyPlan() {
       week_number: week.weekNumber,
       theme: week.theme,
       objectives: week.objectives,
-      activity_index: week.activities.map((a) => ({
+      circle_time: {
+        letter: week.circleTime.letter,
+        color: week.circleTime.color,
+        shape: week.circleTime.shape,
+        counting_to: week.circleTime.countingTo,
+      },
+      activities: week.activities.map((a) => ({
         id: a.id,
         day: a.day,
         title: a.title,
         domain: a.domain,
         duration: a.duration,
+        description: a.description,
+        materials: a.materials,
+        theme_connection: a.themeConnection ?? "",
+        safety_notes: a.safetyNotes ?? "",
+        adaptations: a.adaptations.map((ad) => ({
+          age_group: ad.age,
+          description: ad.content,
+        })),
+        reflection_prompts: a.reflectionPrompts ?? [],
       })),
     };
   }, [week, weekId]);
