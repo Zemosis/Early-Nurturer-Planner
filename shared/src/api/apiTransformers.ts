@@ -159,15 +159,20 @@ export function transformApiPlanToWeekPlan(api: any): WeekPlan {
   for (const dp of api.daily_plans ?? []) {
     for (const act of dp.activities ?? []) {
       flatActivities.push({
+        id: act.id ?? `${(act.day ?? dp.day).toLowerCase()}-activity-${flatActivities.length}`,
         day: act.day ?? dp.day,
         title: act.title,
         domain: act.domain,
+        duration: act.duration ?? 15,
         materials: act.materials ?? [],
         description: act.description,
         adaptations: (act.adaptations ?? []).map((ad: any) => ({
           age: ad.age_group,
           content: ad.description,
         })),
+        themeConnection: act.theme_connection,
+        safetyNotes: act.safety_notes,
+        reflectionPrompts: act.reflection_prompts,
       });
     }
   }

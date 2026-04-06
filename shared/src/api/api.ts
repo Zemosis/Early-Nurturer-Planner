@@ -391,3 +391,140 @@ export async function bulkExportMaterials(
   const blob = await res.blob();
   return { blob, filename };
 }
+
+// ── Chat Assistant ─────────────────────────────────────────
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+}
+
+export interface ChatThread {
+  thread_id: string;
+  created_at: string | null;
+  preview: string;
+  message_count: number;
+}
+
+export interface ChatActivityEdit {
+  activity_id: string;
+  title?: string;
+  domain?: string;
+  duration?: number;
+  description?: string;
+  theme_connection?: string;
+  materials?: string[];
+  safety_notes?: string;
+  adaptations?: { age_group: string; description: string; modifications: string[] }[];
+  reflection_prompts?: string[];
+}
+
+export interface ChatResponse {
+  thread_id: string;
+  message: ChatMessage;
+  activity_edit?: ChatActivityEdit | null;
+  thread_rotated: boolean;
+  error?: { code: string; retryable: boolean } | null;
+}
+
+export interface ChatPlanContext {
+  plan_id: string;
+  week_number: number;
+  theme: string;
+  objectives: { domain: string; goal: string }[];
+  activity_index: {
+    id: string;
+    day: string;
+    title: string;
+    domain: string;
+    duration: number;
+  }[];
+}
+
+export async function sendChatMessage(
+  userId: string,
+  body: { threadId?: string; message: string; planContext?: ChatPlanContext },
+): Promise<ChatResponse> {
+  const res = await fetch(`${apiBase}/api/chat/${userId}/message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      thread_id: body.threadId ?? null,
+      message: body.message,
+      plan_context: body.planContext ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Chat message failed");
+  }
+  return res.json();
+}
+
+export async function fetchChatThreads(
+  userId: string = DEFAULT_USER_ID
+): Promise<ChatThread[]> {
+  const res = await fetch(`${apiBase}/api/chat/${userId}/threads`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Failed to fetch threads");
+  }
+  return res.json();
+}
+
+export async function fetchChatThread(
+  userId: string,
+  threadId: string,
+  cursor?: string,
+): Promise<{ messages: ChatMessage[]; next_cursor: string | null }> {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  const res = await fetch(
+    `${apiBase}/api/chat/${userId}/thread/${threadId}?${params}`
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Failed to fetch thread");
+  }
+  return res.json();
+}
+
+export async function startNewChatThread(
+  userId: string = DEFAULT_USER_ID,
+  planContext?: ChatPlanContext,
+): Promise<{ thread_id: string }> {
+  const res = await fetch(`${apiBase}/api/chat/${userId}/thread/new`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan_context: planContext ?? null }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Failed to create thread");
+  }
+  return res.json();
+}
+
+export async function applyActivityEdit(
+  userId: string,
+  planId: string,
+  activityId: string,
+  activityData: ChatActivityEdit,
+): Promise<{ status: string; activity: Record<string, unknown> }> {
+  const res = await fetch(
+    `${apiBase}/api/planner/${userId}/plan/${planId}/activity/${activityId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(activityData),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Failed to apply activity edit");
+  }
+  return res.json();
+}

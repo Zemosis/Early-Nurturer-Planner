@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { ArrowLeft, MessageCircle, Loader2, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ChatAssistant } from "../components/ChatAssistant";
+import { ChatProvider } from "../contexts/ChatContext";
 import { OverviewTab } from "../components/tabs/OverviewTab";
 import { CircleTimeTab } from "../components/tabs/CircleTimeTab";
 import { ThemeActivitiesTab } from "../components/tabs/ThemeActivitiesTab";
@@ -12,6 +13,7 @@ import { DocumentationTab } from "../components/tabs/DocumentationTab";
 import { DailyScheduleTab } from "../components/tabs/DailyScheduleTab";
 import { ThemeSelectionHeader } from "../components/ThemeSelectionHeader";
 import { useTheme, usePlanner, ThemeDetail, fetchPlanById, swapTheme, transformApiPlanToWeekPlan } from 'shared';
+import type { ChatPlanContext } from 'shared';
 
 const tabs = [
   { id: "overview", label: "Overview" },
@@ -98,6 +100,24 @@ export default function WeeklyPlan() {
   }, [fetchFailed, loading, navigate]);
 
   const week = currentPlan;
+
+  // Build condensed plan context for the chat assistant
+  const chatPlanContext = useMemo<ChatPlanContext | null>(() => {
+    if (!week || !weekId) return null;
+    return {
+      plan_id: weekId,
+      week_number: week.weekNumber,
+      theme: week.theme,
+      objectives: week.objectives,
+      activity_index: week.activities.map((a) => ({
+        id: a.id,
+        day: a.day,
+        title: a.title,
+        domain: a.domain,
+        duration: a.duration,
+      })),
+    };
+  }, [week, weekId]);
 
   const [swapLoading, setSwapLoading] = useState(false);
 
@@ -206,10 +226,13 @@ export default function WeeklyPlan() {
         {activeTab === "docs" && <DocumentationTab week={week} />}
       </main>
 
-      <ChatAssistant
-        isOpen={isChatOpen}
-        onToggle={() => setIsChatOpen(!isChatOpen)}
-      />
+      <ChatProvider planId={weekId} planContext={chatPlanContext}>
+        <ChatAssistant
+          isOpen={isChatOpen}
+          onToggle={() => setIsChatOpen(!isChatOpen)}
+          planId={weekId}
+        />
+      </ChatProvider>
 
       {/* Theme Swap Loading Overlay */}
       <AnimatePresence>

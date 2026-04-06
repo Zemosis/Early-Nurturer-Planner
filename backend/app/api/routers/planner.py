@@ -1157,6 +1157,50 @@ async def update_schedule(user_id: str, plan_id: str, body: UpdateScheduleReques
     return {"status": "updated", "schedule": schedule_data}
 
 
+# ── Activity Edit (Chat Assistant) ──────────────────────────
+
+
+class ActivityEditRequest(BaseModel):
+    """Partial activity update — only changed fields."""
+    activity_id: str
+    title: str | None = None
+    domain: str | None = None
+    duration: int | None = None
+    description: str | None = None
+    theme_connection: str | None = None
+    materials: list[str] | None = None
+    safety_notes: str | None = None
+    adaptations: list[dict] | None = None
+    reflection_prompts: list[str] | None = None
+
+
+@router.patch("/{user_id}/plan/{plan_id}/activity/{activity_id}")
+async def patch_activity(
+    user_id: str, plan_id: str, activity_id: str, body: ActivityEditRequest
+):
+    """Merge partial edits onto an existing activity in the plan JSONB."""
+    from app.services.chat_service import apply_activity_edit
+
+    if body.activity_id != activity_id:
+        raise HTTPException(
+            status_code=400,
+            detail="activity_id in body must match URL parameter.",
+        )
+
+    try:
+        uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    edits = body.model_dump(exclude_none=True)
+    updated = await apply_activity_edit(user_id, plan_id, activity_id, edits)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Activity not found in plan.")
+
+    logger.info("Patched activity %s in plan %s", activity_id, plan_id)
+    return {"status": "updated", "activity": updated}
+
+
 # ── Phase 3: Bulk PDF Export ────────────────────────────────
 
 

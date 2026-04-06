@@ -54,15 +54,20 @@ export interface WeekPlan {
     }[];
   };
   activities: {
+    id: string;
     day: string;
     title: string;
     domain: string;
+    duration: number;
     materials: string[];
     description: string;
     adaptations: {
       age: string;
       content: string;
     }[];
+    themeConnection?: string;
+    safetyNotes?: string;
+    reflectionPrompts?: string[];
   }[];
   newsletter: {
     professional: string;
