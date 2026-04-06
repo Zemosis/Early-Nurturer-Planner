@@ -79,7 +79,16 @@ export function ChatProvider({ children, planId, planContext }: ChatProviderProp
         if (cancelled) return;
         if (result.thread_id && result.messages.length > 0) {
           setThreadId(result.thread_id);
-          setMessages(result.messages);
+          setMessages([
+            ...result.messages,
+            {
+              id: `system-restored-${Date.now()}`,
+              role: "system" as const,
+              content: "Previous conversation restored.",
+              metadata: {},
+              created_at: new Date().toISOString(),
+            },
+          ]);
           isFirstMessage.current = false;
         }
       } catch {
