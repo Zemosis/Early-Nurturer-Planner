@@ -702,7 +702,11 @@ async def send_message(
 async def apply_activity_edit(
     user_id: str, plan_id: str, activity_id: str, edits: dict
 ) -> dict | None:
-    """Merge partial activity edits onto the existing activity in the plan JSONB.
+    """Merge partial activity edits onto the existing activity in the plan.
+
+    WeeklyPlan stores activities as a flat JSONB list (not nested under
+    daily_plans). We find the matching activity by id, merge the edits,
+    and save back.
 
     Returns the full updated activity, or None if not found.
     """
@@ -715,30 +719,27 @@ async def apply_activity_edit(
             )
         )
         plan = result.scalar_one_or_none()
-        if not plan or not plan.plan_data:
+        if not plan or not plan.activities:
             return None
 
-        plan_data = copy.deepcopy(plan.plan_data)
+        activities = copy.deepcopy(plan.activities)
         updated_activity = None
 
-        for dp in plan_data.get("daily_plans", []):
-            for act in dp.get("activities", []):
-                if act.get("id") == activity_id:
-                    # Merge edits (only non-None fields)
-                    for key, value in edits.items():
-                        if key == "activity_id":
-                            continue
-                        if value is not None:
-                            act[key] = value
-                    updated_activity = act
-                    break
-            if updated_activity:
+        for act in activities:
+            if act.get("id") == activity_id:
+                # Merge edits (only non-None fields)
+                for key, value in edits.items():
+                    if key == "activity_id":
+                        continue
+                    if value is not None:
+                        act[key] = value
+                updated_activity = act
                 break
 
         if not updated_activity:
             return None
 
-        plan.plan_data = plan_data
+        plan.activities = activities
         await session.commit()
 
         return updated_activity
