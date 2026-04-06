@@ -17,6 +17,7 @@ import {
   applyActivityEdit,
   DEFAULT_USER_ID,
   type ChatActivityEdit,
+  type ChatPlanContext,
 } from "shared";
 import { usePlanner } from "shared";
 
@@ -24,14 +25,35 @@ interface ChatAssistantProps {
   isOpen?: boolean;
   onToggle?: () => void;
   planId?: string;
+  planContext?: ChatPlanContext | null;
 }
 
-const SUGGESTIONS = [
-  "Make it more sensory",
-  "Add fine motor activities",
-  "Simplify for 1-year-olds",
-  "Suggest outdoor alternatives",
+const FALLBACK_SUGGESTIONS = [
+  "What activities do we have this week?",
+  "Tell me about the plan",
+  "Suggest adaptations for the youngest children",
+  "What materials do I need?",
 ];
+
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function getSuggestions(planContext: ChatPlanContext | null | undefined): string[] {
+  if (!planContext?.activities?.length) return FALLBACK_SUGGESTIONS;
+
+  const todayName = DAY_NAMES[new Date().getDay()];
+  const todayActivity = planContext.activities.find((a) => a.day === todayName);
+
+  return [
+    todayActivity
+      ? `Tell me about ${todayActivity.title}`
+      : "What's planned for Monday?",
+    "What materials do I need this week?",
+    "Suggest adaptations for the youngest children",
+    planContext.theme
+      ? `How does "${planContext.theme}" connect to our activities?`
+      : "Suggest outdoor alternatives",
+  ];
+}
 
 function TypingIndicator() {
   return (
@@ -168,10 +190,10 @@ function ActivityEditCard({
   };
 
   return (
-    <div className="mx-2 my-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
+    <div className="mx-2 my-2 rounded-xl border p-3" style={{ borderColor: 'color-mix(in srgb, var(--theme-primary) 20%, transparent)', backgroundColor: 'color-mix(in srgb, var(--theme-primary) 5%, transparent)' }}>
       <div className="flex items-center gap-2 mb-2">
-        <div className="w-2 h-2 rounded-full bg-primary" />
-        <span className="text-xs font-medium text-primary">
+        <div className="w-2 h-2 rounded-full bg-theme-primary" />
+        <span className="text-xs font-medium text-theme-primary">
           Activity Modification
         </span>
       </div>
@@ -202,7 +224,7 @@ function ActivityEditCard({
             <button
               onClick={handleApply}
               disabled={applying}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 btn-theme-primary rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
             >
               {applying ? (
                 <motion.div
@@ -274,7 +296,7 @@ function MessageBubble({
           : "px-3 py-1.5 bg-muted/30 rounded-full"
         }>
           {isRichContent ? (
-            <div className="text-xs text-muted-foreground prose prose-sm max-w-none prose-p:my-0.5 prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded">
+            <div className="text-xs text-muted-foreground prose prose-sm max-w-none prose-p:my-0.5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded" style={{ ['--tw-prose-code' as any]: 'var(--theme-primary)' }}>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {message.content}
               </ReactMarkdown>
@@ -294,7 +316,7 @@ function MessageBubble({
       <div
         className={`max-w-[85%] ${
           isUser
-            ? "bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-2.5"
+            ? "bg-theme-primary text-white rounded-2xl rounded-br-md px-4 py-2.5"
             : "bg-muted/30 text-foreground rounded-2xl rounded-bl-md px-4 py-2.5"
         }`}
       >
@@ -332,7 +354,9 @@ export function ChatAssistant({
   isOpen = false,
   onToggle = () => {},
   planId,
+  planContext,
 }: ChatAssistantProps) {
+  const suggestions = getSuggestions(planContext);
   const {
     messages,
     loading,
@@ -418,7 +442,7 @@ export function ChatAssistant({
   const chatContent = (
     <>
       {/* Header */}
-      <div className="bg-primary text-primary-foreground p-4 flex items-center justify-between shrink-0">
+      <div className="bg-theme-primary text-white p-4 flex items-center justify-between shrink-0">
         <h3 className="font-medium">Curriculum Assistant</h3>
         <div className="flex items-center gap-1">
           <button
@@ -443,16 +467,16 @@ export function ChatAssistant({
           <>
             <div className="bg-muted/20 rounded-2xl p-4 mb-4">
               <p className="text-sm text-foreground">
-                Hello! I can help you modify activities, suggest alternatives,
-                simplify content, or answer curriculum questions. How can I
-                assist you today?
+                {planContext?.theme
+                  ? `Hi there! I'm Nuri, your curriculum partner. This week we're exploring "${planContext.theme}" \u2014 I know all the activities, materials, and your children's needs. What would you like to work on?`
+                  : "Hi! I'm Nuri, your curriculum specialist. Open a weekly plan and I can help you with activities, adaptations, and more."}
               </p>
             </div>
             <div className="space-y-2 mb-4">
               <p className="text-xs text-muted-foreground mb-2">
                 Quick suggestions:
               </p>
-              {SUGGESTIONS.map((suggestion) => (
+              {suggestions.map((suggestion) => (
                 <button
                   key={suggestion}
                   className="w-full text-left px-4 py-2.5 bg-accent/20 hover:bg-accent/30 rounded-xl text-sm transition-colors"
@@ -507,7 +531,7 @@ export function ChatAssistant({
           <button
             onClick={handleSend}
             disabled={!input.trim() || loading}
-            className="p-3 bg-primary text-primary-foreground rounded-xl disabled:opacity-50 hover:bg-primary/90 transition-colors"
+            className="p-3 btn-theme-primary rounded-xl disabled:opacity-50 transition-colors"
           >
             <Send className="w-5 h-5" />
           </button>

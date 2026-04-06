@@ -9,7 +9,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.services.chat_service import (
     get_or_create_thread,
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
 class SendMessageRequest(BaseModel):
     thread_id: Optional[str] = None
-    message: str
+    message: str = Field(..., min_length=1, max_length=2000)
     plan_id: Optional[str] = None
     plan_context: Optional[dict] = None
 

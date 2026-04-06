@@ -246,6 +246,7 @@ export default function WeeklyPlan() {
           isOpen={isChatOpen}
           onToggle={() => setIsChatOpen(!isChatOpen)}
           planId={weekId}
+          planContext={chatPlanContext}
         />
       </ChatProvider>
 
