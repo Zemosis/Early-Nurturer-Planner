@@ -384,9 +384,9 @@ export function ChatAssistant({
             id: `system-help-${Date.now()}`,
             role: "system" as const,
             content:
-              "**Available commands:**\n" +
-              "`/clear` — Clear this conversation's chat history\n" +
-              "`/help` — Show this help message",
+              "**Available commands:**\n\n" +
+              "- `/clear` — Clear this conversation's chat history\n" +
+              "- `/help` — Show this help message",
             metadata: {},
             created_at: new Date().toISOString(),
           },
